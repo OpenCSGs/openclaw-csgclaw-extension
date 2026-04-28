@@ -1,0 +1,17 @@
+{
+  "id": "csgclaw",
+  "kind": "channel",
+  "channels": ["csgclaw"],
+  "name": "CSGClaw",
+  "description": "CSGClaw IM bridge (PicoClaw-compatible bot API).",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "csgclaw": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  }
+}

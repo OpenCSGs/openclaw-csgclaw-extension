@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tgz
+docker/oc-state/
+docker/csgclaw-cli/csgclaw-cli_linux_*

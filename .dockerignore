@@ -1,0 +1,5 @@
+node_modules
+oc-state
+openclaw.gateway.local.json
+.git
+.DS_Store

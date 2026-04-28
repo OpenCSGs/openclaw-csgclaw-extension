@@ -1,0 +1,46 @@
+{
+  "name": "csgclaw-extension",
+  "version": "0.1.0",
+  "description": "OpenClaw channel plugin: CSGClaw IM bridge (SSE + REST)",
+  "type": "module",
+  "main": "dist/index.js",
+  "files": ["dist", "openclaw.plugin.json"],
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "openclaw": "2026.3.31",
+    "typescript": "^5.7.2"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.31"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": ["./dist/index.js"],
+    "setupEntry": "./dist/setup-entry.js",
+    "channel": {
+      "id": "csgclaw",
+      "label": "CSGClaw",
+      "selectionLabel": "CSGClaw (IM bridge)",
+      "blurb": "Gateway connects to CSGClaw via bot SSE and REST.",
+      "order": 15,
+      "quickstartAllowFrom": true
+    },
+    "install": {
+      "npmSpec": "csgclaw-extension",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.3.31"
+    }
+  }
+}
