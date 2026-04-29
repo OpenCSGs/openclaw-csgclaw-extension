@@ -1,9 +1,9 @@
-# ACR image: <registry>/<namespace>/openclaw-csgclaw:<base_yyyymmdd>.<release_yyyymmdd>.<n>
-# OPENCLAW_BASE_VERSION in Dockerfile maps to base tag (e.g. 2026.3.31 -> 20260331).
+# ACR image: <registry>/<namespace>/openclaw:<yyyymmdd>.<n>-csgclaw
+# OPENCLAW_BASE_VERSION in Dockerfile selects the upstream ghcr.io/openclaw/openclaw slim base.
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
-IMAGE_REPO ?= opencsg_public/openclaw-csgclaw
-# Bump release segment when publishing; base segment should match OPENCLAW_BASE_VERSION in Dockerfile.
-TAG ?= 20260331.20260428.1
+IMAGE_REPO ?= opencsg_public/openclaw
+# Bump date segment or .<n> when publishing (release counter per day).
+TAG ?= 20260429.1-csgclaw
 
 IMAGE := $(REGISTRY)/$(IMAGE_REPO):$(TAG)
 

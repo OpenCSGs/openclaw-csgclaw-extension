@@ -1,7 +1,7 @@
 # OpenClaw slim + csgclaw-extension baked under /home/node/openclaw-plugins/csgclaw-extension
 #
 # ACR (see Makefile): make image
-#   -> opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsg_public/openclaw-csgclaw:<tag>
+#   -> opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsg_public/openclaw:<tag>
 # Local: make image-local  -> openclaw-csgclaw:local
 #
 # The Makefile targets `prepare-dist` and `prepare-csgclaw-cli` produce all
@@ -32,6 +32,18 @@ COPY --from=csgclaw-cli --chmod=0755 /csgclaw-cli /usr/local/bin/csgclaw-cli
 COPY --chown=1000:1000 dist /home/node/openclaw-plugins/csgclaw-extension/dist
 COPY --chown=1000:1000 package.json /home/node/openclaw-plugins/csgclaw-extension/package.json
 COPY --chown=1000:1000 openclaw.plugin.json /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
+
+# Python for workspace skills (e.g. manager-worker-dispatch): Debian `python3` with
+# --no-install-recommends is already the smallest supported bundle that includes the
+# full standard library (urllib, subprocess, ssl, ...). `python3-minimal` alone is too
+# stripped for these scripts. Non-Debian bases (e.g. Alpine apk python3) would differ.
+USER root
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python3 \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && ln -sf /usr/bin/python3 /usr/local/bin/python
 
 USER 1000
 ENV HOME=/home/node
