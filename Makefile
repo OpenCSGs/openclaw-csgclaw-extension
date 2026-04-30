@@ -3,7 +3,7 @@
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsg_public/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
-TAG ?= 20260429.1-csgclaw
+TAG ?= 20260429.2-csgclaw
 
 IMAGE := $(REGISTRY)/$(IMAGE_REPO):$(TAG)
 
