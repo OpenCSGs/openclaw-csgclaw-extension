@@ -16,6 +16,58 @@ type PicoClawSsePayload = {
   mentions?: string[];
 };
 
+function readBoolean(v: unknown): boolean | undefined {
+  return typeof v === "boolean" ? v : undefined;
+}
+
+function readRecord(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+}
+
+function resolveCsgclawGroupRequireMention(cfg: OpenClawConfig, roomId: string): boolean {
+  const channels = readRecord(cfg.channels);
+  const csgclaw = readRecord(channels?.csgclaw);
+  if (!csgclaw) {
+    return true;
+  }
+
+  const groups = readRecord(csgclaw.groups);
+  const roomGroup = readRecord(groups?.[roomId]);
+  const defaultGroup = readRecord(groups?.["*"]);
+  const configured =
+    readBoolean(roomGroup?.requireMention) ?? readBoolean(defaultGroup?.requireMention);
+  if (typeof configured === "boolean") {
+    return configured;
+  }
+
+  const camelTrigger = readRecord(csgclaw.groupTrigger);
+  const snakeTrigger = readRecord(csgclaw.group_trigger);
+  return (
+    readBoolean(camelTrigger?.mentionOnly) ??
+    readBoolean(camelTrigger?.mention_only) ??
+    readBoolean(snakeTrigger?.mentionOnly) ??
+    readBoolean(snakeTrigger?.mention_only) ??
+    true
+  );
+}
+
+export function shouldDispatchCsgclawInbound(params: {
+  cfg: OpenClawConfig;
+  chatType: "direct" | "group";
+  roomId: string;
+  wasMentioned: boolean;
+}): boolean {
+  if (params.chatType !== "group") {
+    return true;
+  }
+  if (!resolveCsgclawGroupRequireMention(params.cfg, params.roomId)) {
+    return true;
+  }
+  return params.wasMentioned;
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -108,6 +160,19 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             payload.chat_type === "direct" || payload.chat_type === "group"
               ? payload.chat_type
               : "group";
+          const wasMentioned = Array.isArray(payload.mentions) && payload.mentions.length > 0;
+
+          if (
+            !shouldDispatchCsgclawInbound({
+              cfg,
+              chatType,
+              roomId,
+              wasMentioned,
+            })
+          ) {
+            ctx.log?.debug?.("csgclaw: skipped unmentioned group message");
+            return;
+          }
 
           const route = core.routing.resolveAgentRoute({
             cfg,
@@ -124,8 +189,6 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             envelope: core.reply.resolveEnvelopeFormatOptions(cfg),
             body: rawBody,
           });
-
-          const wasMentioned = Array.isArray(payload.mentions) && payload.mentions.length > 0;
 
           const ctxPayload = core.reply.finalizeInboundContext({
             Body: body,
