@@ -3,9 +3,16 @@
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsghq/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
-TAG ?= 20260509.1-csgclaw
+TAG ?= 20260518.1-csgclaw
+# Optional additional tags for environment aliases or staged promotion.
+# Example: make image EXTRA_TAGS="dev-csgclaw stg-csgclaw"
+EXTRA_TAGS ?=
+# Tags to move to an already-pushed immutable image tag.
+# Example: make promote-image PROMOTE_TAGS="dev-csgclaw stg-csgclaw"
+PROMOTE_TAGS ?=
 
-IMAGE := $(REGISTRY)/$(IMAGE_REPO):$(TAG)
+IMAGE_TAGS := $(TAG) $(EXTRA_TAGS)
+IMAGE_TAG_ARGS := $(foreach tag,$(IMAGE_TAGS),-t $(REGISTRY)/$(IMAGE_REPO):$(tag))
 
 # Path to the sibling csgclaw repo (provides cmd/csgclaw-cli sources).
 CSGCLAW_DIR ?= ../csgclaw
@@ -47,7 +54,7 @@ image: prepare-csgclaw-cli prepare-dist
 	docker buildx build \
 	  --builder $(BUILDX_BUILDER) \
 	  --platform $(PLATFORMS) \
-	  -t $(IMAGE) \
+	  $(IMAGE_TAG_ARGS) \
 	  --push .
 
 .PHONY: image-local
@@ -56,3 +63,16 @@ image-local: prepare-csgclaw-cli prepare-dist
 	  --platform $(PLATFORM) \
 	  -t openclaw-csgclaw:local \
 	  --load .
+
+.PHONY: image-tags
+image-tags:
+	@printf '%s\n' $(foreach tag,$(IMAGE_TAGS),$(REGISTRY)/$(IMAGE_REPO):$(tag))
+
+.PHONY: promote-image
+promote-image:
+	@if [ -z "$(strip $(PROMOTE_TAGS))" ]; then \
+	  echo "PROMOTE_TAGS is required, e.g. make promote-image PROMOTE_TAGS=\"dev-csgclaw stg-csgclaw\""; exit 1; \
+	fi
+	docker buildx imagetools create \
+	  $(foreach tag,$(PROMOTE_TAGS),-t $(REGISTRY)/$(IMAGE_REPO):$(tag)) \
+	  $(REGISTRY)/$(IMAGE_REPO):$(TAG)
