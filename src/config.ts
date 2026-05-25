@@ -42,24 +42,9 @@ export function resolveCsgclawAccount(
     throw new Error("csgclaw: missing channels.csgclaw in openclaw.json");
   }
   const enabled = s.enabled !== false;
-  const baseUrl = pickStr(
-    s.baseUrl,
-    s.base_url,
-    process.env.CSGCLAW_BASE_URL,
-    process.env.PICOCLAW_CHANNELS_CSGCLAW_BASE_URL,
-  );
-  const botId = pickStr(
-    s.botId,
-    s.bot_id,
-    process.env.CSGCLAW_BOT_ID,
-    process.env.PICOCLAW_CHANNELS_CSGCLAW_BOT_ID,
-  );
-  const accessToken = pickStr(
-    s.accessToken,
-    s.access_token,
-    process.env.CSGCLAW_ACCESS_TOKEN,
-    process.env.PICOCLAW_CHANNELS_CSGCLAW_ACCESS_TOKEN,
-  );
+  const baseUrl = pickStr(s.baseUrl, s.base_url, process.env.CSGCLAW_BASE_URL);
+  const botId = pickStr(s.botId, s.bot_id, process.env.CSGCLAW_BOT_ID);
+  const accessToken = pickStr(s.accessToken, s.access_token, process.env.CSGCLAW_ACCESS_TOKEN);
   if (!baseUrl) {
     throw new Error("csgclaw: baseUrl (or base_url) is required");
   }

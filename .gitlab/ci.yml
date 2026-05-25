@@ -1,0 +1,174 @@
+# GitLab CI: build the OpenClaw image with csgclaw-extension baked in and
+# push it to Alibaba Cloud ACR.
+# Config path: .gitlab/ci.yml - set in Project -> Settings -> CI/CD ->
+# General pipelines -> "CI/CD configuration file".
+#
+# Runner: docker executor + privileged dind.
+#
+# Required CI/CD variables:
+#   ACR_REGISTRY, ACR_USERNAME, ACR_PASSWORD
+#
+# Optional CI/CD variables:
+#   CSGCLAW_REPO_URL      csgclaw source repo used to build csgclaw-cli
+#   CSGCLAW_REF           branch/tag/SHA to checkout from CSGCLAW_REPO_URL
+#   DOCKER_PLATFORMS      buildx platforms, e.g. linux/amd64,linux/arm64
+#   EXTRA_TAGS            additional image tags separated by spaces
+#   NODE_CI_IMAGE         Node.js build image mirrored in ACR
+#   GO_CI_IMAGE           Go build image mirrored in ACR
+#   SKIP_BINFMT_INSTALL   set true when the runner host already has qemu
+
+variables:
+  GIT_STRATEGY: clone
+  GIT_DEPTH: "0"
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_BUILDKIT: "1"
+  BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
+  DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
+  OPENCLAW_BASE_VERSION: "2026.3.31"
+  CSGCLAW_REPO_URL: "https://github.com/OpenCSGs/csgclaw.git"
+  CSGCLAW_REF: "main"
+  GOTOOLCHAIN: "auto"
+  GOPROXY: "https://goproxy.cn,direct"
+  CI_DOCKER_IMAGE: "${ACR_REGISTRY}/opencsg_public/docker:27.3"
+  CI_DIND_IMAGE: "${ACR_REGISTRY}/opencsg_public/docker:27.3-dind"
+  NODE_CI_IMAGE: "${ACR_REGISTRY}/opencsghq/node:22.14.0-bookworm-slim"
+  GO_CI_IMAGE: "${ACR_REGISTRY}/opencsg_public/golang:bookworm"
+  BINFMT_IMAGE: "${ACR_REGISTRY}/opencsg_public/binfmt:latest"
+  BUILDKIT_CI_IMAGE: "${ACR_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
+
+stages:
+  - build
+
+docker-build-push:
+  stage: build
+  image:
+    name: "$CI_DOCKER_IMAGE"
+    entrypoint: [""]
+  services:
+    - name: "$CI_DIND_IMAGE"
+      command: ["--feature=containerd-snapshotter", "--experimental"]
+      alias: docker
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - Dockerfile
+        - Makefile
+        - package.json
+        - pnpm-lock.yaml
+        - tsconfig.json
+        - index.ts
+        - setup-entry.ts
+        - src/*
+        - src/**/*
+        - openclaw.plugin.json
+        - docker/*
+        - docker/**/*
+        - .gitlab/ci.yml
+  before_script:
+    - export TZ=Asia/Shanghai
+    - sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+    - apk add --no-cache coreutils git
+    - ': "${ACR_REGISTRY:?ACR_REGISTRY is required}"'
+    - ': "${ACR_USERNAME:?ACR_USERNAME is required}"'
+    - ': "${ACR_PASSWORD:?ACR_PASSWORD is required}"'
+    - echo "$ACR_PASSWORD" | docker login -u "$ACR_USERNAME" --password-stdin "$ACR_REGISTRY"
+    - export IMAGE_TAG="$(date +%Y%m%d).${CI_PIPELINE_IID}-csgclaw"
+    - export DOCKER_IMAGE="${ACR_REGISTRY}/opencsghq/openclaw"
+    - echo "IMAGE_TAG=${IMAGE_TAG}" && echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
+    - docker info
+    - docker buildx version
+    - |
+      set -euo pipefail
+      echo "Building csgclaw-extension dist with ${NODE_CI_IMAGE}"
+      docker run --rm \
+        -v "${CI_PROJECT_DIR}:/work" \
+        -w /work \
+        "${NODE_CI_IMAGE}" \
+        sh -ec '
+          corepack enable
+          corepack prepare pnpm@10.12.1 --activate
+          pnpm install --frozen-lockfile
+          pnpm run build
+        '
+    - |
+      set -euo pipefail
+      export CSGCLAW_DIR="${CI_PROJECT_DIR}/.ci/csgclaw"
+      rm -rf "${CSGCLAW_DIR}"
+      if ! git clone --depth 1 --branch "${CSGCLAW_REF}" "${CSGCLAW_REPO_URL}" "${CSGCLAW_DIR}"; then
+        git clone --depth 50 "${CSGCLAW_REPO_URL}" "${CSGCLAW_DIR}"
+        git -C "${CSGCLAW_DIR}" fetch --depth 1 origin "${CSGCLAW_REF}"
+        git -C "${CSGCLAW_DIR}" checkout FETCH_HEAD
+      fi
+      mkdir -p docker/csgclaw-cli
+      echo "Building csgclaw-cli from ${CSGCLAW_REPO_URL}@${CSGCLAW_REF} with ${GO_CI_IMAGE}"
+      docker run --rm \
+        -e "GOTOOLCHAIN=${GOTOOLCHAIN}" \
+        -e "GOPROXY=${GOPROXY}" \
+        -v "${CSGCLAW_DIR}:/src" \
+        -v "${CI_PROJECT_DIR}/docker/csgclaw-cli:/out" \
+        -w /src \
+        "${GO_CI_IMAGE}" \
+        sh -ec '
+          set -eu
+          version="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+          commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ldflags="-s -w -X csgclaw/internal/version.Version=${version} -X csgclaw/internal/version.Commit=${commit} -X csgclaw/internal/version.BuildTime=${build_time}"
+          mkdir -p /tmp/gocache /tmp/gomodcache
+          GOCACHE=/tmp/gocache GOMODCACHE=/tmp/gomodcache GOOS=linux GOARCH=amd64 go build -ldflags "${ldflags}" -o /out/csgclaw-cli_linux_amd64 ./cmd/csgclaw-cli
+          GOCACHE=/tmp/gocache GOMODCACHE=/tmp/gomodcache GOOS=linux GOARCH=arm64 go build -ldflags "${ldflags}" -o /out/csgclaw-cli_linux_arm64 ./cmd/csgclaw-cli
+        '
+      test -s docker/csgclaw-cli/csgclaw-cli_linux_amd64
+      test -s docker/csgclaw-cli/csgclaw-cli_linux_arm64
+    - |
+      set -eu
+      if [ "${SKIP_BINFMT_INSTALL:-}" = "true" ] || [ "${SKIP_BINFMT_INSTALL:-}" = "1" ]; then
+        echo "SKIP_BINFMT_INSTALL: skip binfmt container"
+      else
+        echo "Installing binfmt from ${BINFMT_IMAGE}"
+        docker run --rm --privileged "${BINFMT_IMAGE}" --install all
+      fi
+    - export BUILDX_BUILDER="csgclaw-extension-mx-${CI_PIPELINE_ID}"
+    - docker buildx rm "${BUILDX_BUILDER}" 2>/dev/null || true
+    - echo "BuildKit image for buildx driver ${BUILDKIT_CI_IMAGE}"
+    - docker buildx create --name "${BUILDX_BUILDER}" --driver docker-container --driver-opt "image=${BUILDKIT_CI_IMAGE}" --bootstrap --use
+    - |
+      set -euo pipefail
+      export OPENCLAW_BASE_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_BASE_VERSION}-slim"
+      echo "Checking OpenClaw base image platforms: ${OPENCLAW_BASE_IMAGE}"
+      docker buildx imagetools inspect "${OPENCLAW_BASE_IMAGE}" | tee /tmp/openclaw-base-manifest.txt
+      grep -Eq 'Platform:[[:space:]]+linux/amd64' /tmp/openclaw-base-manifest.txt
+      grep -Eq 'Platform:[[:space:]]+linux/arm64' /tmp/openclaw-base-manifest.txt
+  script:
+    - |
+      set -euo pipefail
+      tag_args="-t ${DOCKER_IMAGE}:${IMAGE_TAG}"
+      for tag in ${EXTRA_TAGS:-}; do
+        tag_args="${tag_args} -t ${DOCKER_IMAGE}:${tag}"
+      done
+      docker buildx build \
+        --platform "${DOCKER_PLATFORMS}" \
+        --build-arg "OPENCLAW_BASE_VERSION=${OPENCLAW_BASE_VERSION}" \
+        ${tag_args} \
+        --provenance=false \
+        --sbom=false \
+        --push \
+        .
+    - |
+      set -euo pipefail
+      docker buildx imagetools inspect "${DOCKER_IMAGE}:${IMAGE_TAG}"
+      for entry in "linux/amd64:x86_64" "linux/arm64:aarch64"; do
+        platform="${entry%%:*}"
+        expected_arch="${entry##*:}"
+        echo "Validating ${DOCKER_IMAGE}:${IMAGE_TAG} on ${platform}"
+        docker run --rm --platform "${platform}" --entrypoint /bin/sh "${DOCKER_IMAGE}:${IMAGE_TAG}" -ec "
+          test \"\$(uname -m)\" = \"${expected_arch}\"
+          python --version >/dev/null
+          node --version >/dev/null
+          /usr/local/bin/csgclaw-cli --help >/dev/null
+          test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js
+          test -f /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
+        "
+  after_script:
+    - docker buildx rm "csgclaw-extension-mx-${CI_PIPELINE_ID}" 2>/dev/null || true
