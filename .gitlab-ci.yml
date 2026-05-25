@@ -1,7 +1,5 @@
 # GitLab CI: build the OpenClaw image with csgclaw-extension baked in and
 # push it to Alibaba Cloud ACR.
-# Config path: .gitlab/ci.yml - set in Project -> Settings -> CI/CD ->
-# General pipelines -> "CI/CD configuration file".
 #
 # Runner: docker executor + privileged dind.
 #
@@ -16,6 +14,9 @@
 #   NODE_CI_IMAGE         Node.js build image mirrored in ACR
 #   GO_CI_IMAGE           Go build image mirrored in ACR
 #   SKIP_BINFMT_INSTALL   set true when the runner host already has qemu
+#
+# Trigger: push a Git tag. The exact Git tag is used as the Docker image tag,
+# so use Docker-compatible tag names such as 20260525.1-csgclaw or v0.1.0.
 
 variables:
   GIT_STRATEGY: clone
@@ -40,6 +41,12 @@ variables:
 stages:
   - build
 
+workflow:
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: always
+    - when: never
+
 docker-build-push:
   stage: build
   image:
@@ -50,21 +57,7 @@ docker-build-push:
       command: ["--feature=containerd-snapshotter", "--experimental"]
       alias: docker
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      changes:
-        - Dockerfile
-        - Makefile
-        - package.json
-        - pnpm-lock.yaml
-        - tsconfig.json
-        - index.ts
-        - setup-entry.ts
-        - src/*
-        - src/**/*
-        - openclaw.plugin.json
-        - docker/*
-        - docker/**/*
-        - .gitlab/ci.yml
+    - if: '$CI_COMMIT_TAG'
   before_script:
     - export TZ=Asia/Shanghai
     - sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
@@ -73,7 +66,14 @@ docker-build-push:
     - ': "${ACR_USERNAME:?ACR_USERNAME is required}"'
     - ': "${ACR_PASSWORD:?ACR_PASSWORD is required}"'
     - echo "$ACR_PASSWORD" | docker login -u "$ACR_USERNAME" --password-stdin "$ACR_REGISTRY"
-    - export IMAGE_TAG="$(date +%Y%m%d).${CI_PIPELINE_IID}-csgclaw"
+    - export IMAGE_TAG="${CI_COMMIT_TAG}"
+    - |
+      set -euo pipefail
+      if ! printf '%s' "${IMAGE_TAG}" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+        echo "Git tag '${IMAGE_TAG}' is not a valid Docker tag." >&2
+        echo "Use only letters, digits, underscore, dot, and dash; do not use slash." >&2
+        exit 1
+      fi
     - export DOCKER_IMAGE="${ACR_REGISTRY}/opencsghq/openclaw"
     - echo "IMAGE_TAG=${IMAGE_TAG}" && echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
     - docker info
