@@ -3,10 +3,10 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { ChannelGatewayContext } from "openclaw/plugin-sdk";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import type { ResolvedCsgclawAccount } from "./config.js";
-import { eventsUrl } from "./config.js";
+import { eventsUrl, feishuEventsUrl, feishuMessagesUrl } from "./config.js";
 import { consumeSseStream } from "./sse.js";
 
-type PicoClawSsePayload = {
+type CsgclawSsePayload = {
   message_id?: string;
   room_id?: string;
   chat_type?: string;
@@ -14,6 +14,19 @@ type PicoClawSsePayload = {
   text?: string;
   timestamp?: string;
   mentions?: string[];
+};
+
+type CsgclawFeishuSsePayload = {
+  type?: string;
+  room_id?: string;
+  message?: {
+    id?: string;
+    sender_id?: string;
+    kind?: string;
+    content?: string;
+    created_at?: string | number;
+    mentions?: Array<{ id?: string; name?: string }>;
+  };
 };
 
 function readBoolean(v: unknown): boolean | undefined {
@@ -24,6 +37,59 @@ function readRecord(v: unknown): Record<string, unknown> | undefined {
   return v && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : undefined;
+}
+
+function readString(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function parseTimestampMs(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return v;
+  }
+  if (typeof v !== "string") {
+    return undefined;
+  }
+  const trimmed = v.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric)) {
+    return numeric;
+  }
+  const parsed = Date.parse(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function isCsgclawFeishuBridgeConfigured(cfg: OpenClawConfig, botId: string): boolean {
+  const channels = readRecord(cfg.channels);
+  const feishu = readRecord(channels?.feishu);
+  if (!feishu || feishu.enabled === false) {
+    return false;
+  }
+
+  const normalizedBotId = botId.trim();
+  if (!normalizedBotId) {
+    return false;
+  }
+
+  const accounts = readRecord(feishu.accounts);
+  const account = readRecord(accounts?.[normalizedBotId]);
+  if (account) {
+    return account.enabled !== false;
+  }
+
+  return readString(feishu.defaultAccount) === normalizedBotId;
+}
+
+function feishuBodyForAgent(params: {
+  messageId: string;
+  senderId: string;
+  content: string;
+}): string {
+  const prefix = params.messageId ? `[message_id: ${params.messageId}]\n` : "";
+  return `${prefix}${params.senderId}: ${params.content}`;
 }
 
 function resolveCsgclawGroupRequireMention(cfg: OpenClawConfig, roomId: string): boolean {
@@ -74,11 +140,20 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
       return;
     }
-    const t = setTimeout(resolve, ms);
-    const onAbort = () => {
+    let t: ReturnType<typeof setTimeout>;
+    const cleanup = () => {
       clearTimeout(t);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onResolve = () => {
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      cleanup();
       reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
     };
+    t = setTimeout(onResolve, ms);
     signal.addEventListener("abort", onAbort, { once: true });
   });
 }
@@ -117,6 +192,34 @@ export async function postSend(
   return json.message_id ?? "";
 }
 
+export async function postFeishuSend(
+  account: ResolvedCsgclawAccount,
+  roomId: string,
+  text: string,
+): Promise<string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (account.accessToken) {
+    headers.Authorization = `Bearer ${account.accessToken}`;
+  }
+  const res = await fetch(feishuMessagesUrl(account), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      room_id: roomId,
+      sender_id: account.botId,
+      content: text,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`csgclaw feishu send: HTTP ${res.status} ${body}`);
+  }
+  const json = (await res.json()) as { id?: string; message_id?: string };
+  return json.id ?? json.message_id ?? "";
+}
+
 export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<ResolvedCsgclawAccount>) {
   const account = ctx.account;
   const core = ctx.channelRuntime;
@@ -143,9 +246,9 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
           if (eventName !== "message") {
             return;
           }
-          let payload: PicoClawSsePayload;
+          let payload: CsgclawSsePayload;
           try {
-            payload = JSON.parse(data) as PicoClawSsePayload;
+            payload = JSON.parse(data) as CsgclawSsePayload;
           } catch {
             return;
           }
@@ -185,7 +288,7 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
           const body = core.reply.formatAgentEnvelope({
             channel: "CSGClaw",
             from: payload.sender?.display_name || payload.sender?.username || senderId,
-            timestamp: payload.timestamp ? Number(payload.timestamp) : undefined,
+            timestamp: parseTimestampMs(payload.timestamp),
             envelope: core.reply.resolveEnvelopeFormatOptions(cfg),
             body: rawBody,
           });
@@ -255,6 +358,150 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
         break;
       }
       ctx.log?.warn?.(`csgclaw: SSE disconnected (${String(err)}), reconnecting…`);
+      try {
+        await sleep(2000, ctx.abortSignal);
+      } catch {
+        break;
+      }
+    }
+  }
+}
+
+export async function monitorCsgclawFeishuProvider(
+  ctx: ChannelGatewayContext<ResolvedCsgclawAccount>,
+) {
+  const account = ctx.account;
+  const core = ctx.channelRuntime;
+  if (!core) {
+    ctx.log?.warn?.("csgclaw-feishu: channelRuntime missing; cannot dispatch inbound replies");
+    return;
+  }
+
+  const cfg = ctx.cfg as OpenClawConfig;
+  if (!isCsgclawFeishuBridgeConfigured(cfg, account.botId)) {
+    ctx.log?.debug?.("csgclaw-feishu: channels.feishu not configured for this bot; skip bridge");
+    return;
+  }
+
+  const url = feishuEventsUrl(account);
+  const headers: Record<string, string> = {};
+  if (account.accessToken) {
+    headers.Authorization = `Bearer ${account.accessToken}`;
+  }
+
+  while (!ctx.abortSignal.aborted) {
+    try {
+      await consumeSseStream({
+        url,
+        headers,
+        signal: ctx.abortSignal,
+        onEvent: async (eventName, data) => {
+          if (eventName !== "message" && eventName !== "message.created") {
+            return;
+          }
+          let payload: CsgclawFeishuSsePayload;
+          try {
+            payload = JSON.parse(data) as CsgclawFeishuSsePayload;
+          } catch {
+            return;
+          }
+          if (payload.type && payload.type !== "message.created") {
+            return;
+          }
+
+          const roomId = payload.room_id?.trim();
+          const message = payload.message;
+          const senderId = message?.sender_id?.trim() ?? "";
+          const rawBody = message?.content ?? "";
+          if (!roomId || !senderId) {
+            return;
+          }
+
+          const route = core.routing.resolveAgentRoute({
+            cfg,
+            channel: "feishu",
+            accountId: account.botId,
+            peer: { kind: "group", id: roomId },
+          });
+
+          const timestamp = parseTimestampMs(message?.created_at);
+          const body = core.reply.formatAgentEnvelope({
+            channel: "Feishu",
+            from: senderId,
+            timestamp,
+            envelope: core.reply.resolveEnvelopeFormatOptions(cfg),
+            body: rawBody,
+          });
+          const messageId = message?.id?.trim() ?? "";
+          const to = `chat:${roomId}`;
+
+          const ctxPayload = core.reply.finalizeInboundContext({
+            Body: body,
+            BodyForAgent: feishuBodyForAgent({ messageId, senderId, content: rawBody }),
+            RawBody: rawBody,
+            CommandBody: rawBody,
+            From: `feishu:${senderId}`,
+            To: to,
+            SessionKey: route.sessionKey,
+            AccountId: route.accountId,
+            ChatType: "group",
+            GroupSubject: roomId,
+            ConversationLabel: roomId,
+            SenderName: senderId,
+            SenderId: senderId,
+            SenderUsername: senderId,
+            Provider: "feishu",
+            Surface: "feishu",
+            MessageSid: messageId,
+            Timestamp: timestamp,
+            OriginatingChannel: "feishu",
+            OriginatingTo: to,
+            CommandAuthorized: true,
+            WasMentioned: true,
+          });
+
+          const storePath = core.session.resolveStorePath(cfg.session?.store, {
+            agentId: route.agentId,
+          });
+
+          await core.session.recordInboundSession({
+            storePath,
+            sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+            ctx: ctxPayload,
+            onRecordError: (err) => {
+              ctx.log?.error?.(`csgclaw-feishu: recordInboundSession: ${String(err)}`);
+            },
+          });
+
+          const { onModelSelected, ...replyPipeline } = createChannelReplyPipeline({
+            cfg,
+            agentId: route.agentId,
+            channel: "feishu",
+            accountId: account.botId,
+          });
+
+          await core.reply.dispatchReplyWithBufferedBlockDispatcher({
+            ctx: ctxPayload,
+            cfg,
+            dispatcherOptions: {
+              ...replyPipeline,
+              deliver: async (reply: ReplyPayload) => {
+                const out = (reply.text ?? "").trim();
+                if (!out) {
+                  return;
+                }
+                await postFeishuSend(account, roomId, out);
+              },
+            },
+            replyOptions: { onModelSelected },
+          });
+        },
+      });
+    } catch (err) {
+      if (ctx.abortSignal.aborted) {
+        break;
+      }
+      ctx.log?.warn?.(`csgclaw-feishu: SSE disconnected (${String(err)}), reconnecting...`);
       try {
         await sleep(2000, ctx.abortSignal);
       } catch {

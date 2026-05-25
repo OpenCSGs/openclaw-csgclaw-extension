@@ -48,10 +48,16 @@ export function resolveCsgclawAccount(
     process.env.CSGCLAW_BASE_URL,
     process.env.PICOCLAW_CHANNELS_CSGCLAW_BASE_URL,
   );
-  const botId = pickStr(s.botId, s.bot_id, process.env.PICOCLAW_CHANNELS_CSGCLAW_BOT_ID);
+  const botId = pickStr(
+    s.botId,
+    s.bot_id,
+    process.env.CSGCLAW_BOT_ID,
+    process.env.PICOCLAW_CHANNELS_CSGCLAW_BOT_ID,
+  );
   const accessToken = pickStr(
     s.accessToken,
     s.access_token,
+    process.env.CSGCLAW_ACCESS_TOKEN,
     process.env.PICOCLAW_CHANNELS_CSGCLAW_ACCESS_TOKEN,
   );
   if (!baseUrl) {
@@ -71,4 +77,12 @@ export function resolveCsgclawAccount(
 
 export function eventsUrl(account: ResolvedCsgclawAccount): string {
   return `${account.baseUrl}/api/bots/${encodeURIComponent(account.botId)}/events`;
+}
+
+export function feishuEventsUrl(account: ResolvedCsgclawAccount): string {
+  return `${account.baseUrl}/api/v1/channels/feishu/bots/${encodeURIComponent(account.botId)}/events`;
+}
+
+export function feishuMessagesUrl(account: ResolvedCsgclawAccount): string {
+  return `${account.baseUrl}/api/v1/channels/feishu/messages`;
 }

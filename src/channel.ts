@@ -8,7 +8,12 @@ import {
   resolveCsgclawAccount,
   type ResolvedCsgclawAccount,
 } from "./config.js";
-import { monitorCsgclawProvider, postSend, roomIdFromOutboundTo } from "./monitor.js";
+import {
+  monitorCsgclawFeishuProvider,
+  monitorCsgclawProvider,
+  postSend,
+  roomIdFromOutboundTo,
+} from "./monitor.js";
 
 const rawOutbound = createRawChannelSendResultAdapter({
   channel: "csgclaw",
@@ -34,7 +39,7 @@ const csgclawCapabilities: ChannelCapabilities = {
 const pluginBase = createChannelPluginBase<ResolvedCsgclawAccount>({
   id: "csgclaw",
   capabilities: csgclawCapabilities,
-  reload: { configPrefixes: ["channels.csgclaw"] },
+  reload: { configPrefixes: ["channels.csgclaw", "channels.feishu"] },
   config: {
     listAccountIds: listCsgclawAccountIds,
     resolveAccount: resolveCsgclawAccount,
@@ -91,7 +96,7 @@ export const csgclawPlugin: ChannelPlugin<ResolvedCsgclawAccount> = createChatCh
           ctx.log?.info?.("csgclaw: account disabled, skip startAccount");
           return;
         }
-        await monitorCsgclawProvider(ctx);
+        await Promise.all([monitorCsgclawProvider(ctx), monitorCsgclawFeishuProvider(ctx)]);
       },
     },
   },
