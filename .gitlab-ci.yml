@@ -35,7 +35,7 @@ variables:
   GOPROXY: "https://goproxy.cn,direct"
   CI_DOCKER_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3"
   CI_DIND_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3-dind"
-  NODE_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsghq/node:22.14.0-bookworm-slim"
+  NODE_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsghq/node:22.13.0-bookworm-slim"
   GO_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/golang:bookworm"
   BINFMT_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/binfmt:latest"
   BUILDKIT_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
