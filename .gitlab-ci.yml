@@ -88,8 +88,7 @@ docker-build-push:
         -w /work \
         "${NODE_CI_IMAGE}" \
         sh -ec '
-          corepack enable
-          corepack prepare pnpm@10.12.1 --activate
+          npm install -g pnpm@10.12.1
           pnpm install --frozen-lockfile
           pnpm run build
         '
