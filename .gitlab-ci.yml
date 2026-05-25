@@ -4,9 +4,10 @@
 # Runner: docker executor + privileged dind.
 #
 # Required CI/CD variables:
-#   ACR_REGISTRY, ACR_USERNAME, ACR_PASSWORD
+#   ACR_USERNAME, ACR_PASSWORD
 #
 # Optional CI/CD variables:
+#   ACR_REGISTRY         defaults to opencsg-registry.cn-beijing.cr.aliyuncs.com
 #   CSGCLAW_REPO_URL      csgclaw source repo used to build csgclaw-cli
 #   CSGCLAW_REF           branch/tag/SHA to checkout from CSGCLAW_REPO_URL
 #   DOCKER_PLATFORMS      buildx platforms, e.g. linux/amd64,linux/arm64
@@ -19,6 +20,7 @@
 # so use Docker-compatible tag names such as 20260525.1-csgclaw or v0.1.0.
 
 variables:
+  ACR_REGISTRY: "opencsg-registry.cn-beijing.cr.aliyuncs.com"
   GIT_STRATEGY: clone
   GIT_DEPTH: "0"
   DOCKER_HOST: tcp://docker:2375
