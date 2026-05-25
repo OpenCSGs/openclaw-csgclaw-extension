@@ -7,6 +7,7 @@
 #   ACR_REGISTRY, ACR_USERNAME, ACR_PASSWORD
 #
 # Optional CI/CD variables:
+#   CI_IMAGE_REGISTRY    registry for public CI helper images
 #   CSGCLAW_REPO_URL      csgclaw source repo used to build csgclaw-cli
 #   CSGCLAW_REF           branch/tag/SHA to checkout from CSGCLAW_REPO_URL
 #   DOCKER_PLATFORMS      buildx platforms, e.g. linux/amd64,linux/arm64
@@ -19,6 +20,7 @@
 # so use Docker-compatible tag names such as 20260525.1-csgclaw or v0.1.0.
 
 variables:
+  CI_IMAGE_REGISTRY: "opencsg-registry.cn-beijing.cr.aliyuncs.com"
   GIT_STRATEGY: clone
   GIT_DEPTH: "0"
   DOCKER_HOST: tcp://docker:2375
@@ -31,12 +33,12 @@ variables:
   CSGCLAW_REF: "main"
   GOTOOLCHAIN: "auto"
   GOPROXY: "https://goproxy.cn,direct"
-  CI_DOCKER_IMAGE: "${ACR_REGISTRY}/opencsg_public/docker:27.3"
-  CI_DIND_IMAGE: "${ACR_REGISTRY}/opencsg_public/docker:27.3-dind"
-  NODE_CI_IMAGE: "${ACR_REGISTRY}/opencsghq/node:22.14.0-bookworm-slim"
-  GO_CI_IMAGE: "${ACR_REGISTRY}/opencsg_public/golang:bookworm"
-  BINFMT_IMAGE: "${ACR_REGISTRY}/opencsg_public/binfmt:latest"
-  BUILDKIT_CI_IMAGE: "${ACR_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
+  CI_DOCKER_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3"
+  CI_DIND_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3-dind"
+  NODE_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsghq/node:22.14.0-bookworm-slim"
+  GO_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/golang:bookworm"
+  BINFMT_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/binfmt:latest"
+  BUILDKIT_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
 
 stages:
   - build
