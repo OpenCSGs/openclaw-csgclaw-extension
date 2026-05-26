@@ -26,6 +26,7 @@ PLATFORM ?= $(shell uname -m | sed -e 's/arm64/linux\/arm64/' -e 's/aarch64/linu
 
 CSGCLAW_CLI_DIR := docker/csgclaw-cli
 BUN ?= bun
+BUN_IMAGE ?= $(REGISTRY)/opencsghq/bun:1.3.4-debian
 
 .PHONY: prepare-csgclaw-cli
 prepare-csgclaw-cli:
@@ -55,6 +56,7 @@ image: prepare-csgclaw-cli prepare-dist
 	docker buildx build \
 	  --builder $(BUILDX_BUILDER) \
 	  --platform $(PLATFORMS) \
+	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
 	  $(IMAGE_TAG_ARGS) \
 	  --push .
 
@@ -62,6 +64,7 @@ image: prepare-csgclaw-cli prepare-dist
 image-local: prepare-csgclaw-cli prepare-dist
 	docker buildx build \
 	  --platform $(PLATFORM) \
+	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
 	  -t openclaw-csgclaw:local \
 	  --load .
 

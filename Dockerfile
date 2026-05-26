@@ -9,7 +9,7 @@
 # pure assembly step (no package install or TypeScript build inside the image build).
 
 ARG OPENCLAW_BASE_VERSION=2026.3.31
-ARG BUN_IMAGE=oven/bun:1.3.4-debian
+ARG BUN_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/bun:1.3.4-debian
 
 FROM ${BUN_IMAGE} AS bun-runtime
 

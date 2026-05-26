@@ -31,7 +31,7 @@ variables:
   CSGCLAW_CLI_BASE_URL: "https://csgclaw.opencsg.com/releases/latest"
   CI_DOCKER_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3"
   CI_DIND_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3-dind"
-  BUN_CI_IMAGE: "oven/bun:1.3.4-debian"
+  BUN_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsghq/bun:1.3.4-debian"
   BINFMT_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/binfmt:latest"
   BUILDKIT_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
 
