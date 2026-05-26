@@ -19,6 +19,8 @@ type CsgclawSsePayload = {
 type CsgclawFeishuSsePayload = {
   type?: string;
   room_id?: string;
+  sender_bot_id?: string;
+  mention_bot_id?: string;
   message?: {
     id?: string;
     sender_id?: string;
@@ -196,6 +198,7 @@ export async function postFeishuSend(
   account: ResolvedCsgclawAccount,
   roomId: string,
   text: string,
+  mentionBotId?: string,
 ): Promise<string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -203,14 +206,19 @@ export async function postFeishuSend(
   if (account.accessToken) {
     headers.Authorization = `Bearer ${account.accessToken}`;
   }
+  const mentionId = mentionBotId?.trim();
+  const body: Record<string, string> = {
+    room_id: roomId,
+    sender_id: account.botId,
+    content: text,
+  };
+  if (mentionId && mentionId !== account.botId) {
+    body.mention_id = mentionId;
+  }
   const res = await fetch(feishuMessagesUrl(account), {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      room_id: roomId,
-      sender_id: account.botId,
-      content: text,
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -434,6 +442,7 @@ export async function monitorCsgclawFeishuProvider(
           });
           const messageId = message?.id?.trim() ?? "";
           const to = `chat:${roomId}`;
+          const replyMentionBotId = payload.sender_bot_id?.trim() ?? "";
 
           const ctxPayload = core.reply.finalizeInboundContext({
             Body: body,
@@ -490,7 +499,7 @@ export async function monitorCsgclawFeishuProvider(
                 if (!out) {
                   return;
                 }
-                await postFeishuSend(account, roomId, out);
+                await postFeishuSend(account, roomId, out, replyMentionBotId);
               },
             },
             replyOptions: { onModelSelected },

@@ -3,7 +3,7 @@
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsghq/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
-TAG ?= 20260518.1-csgclaw
+TAG ?= 20260526.1-csgclaw
 # Optional additional tags for environment aliases or staged promotion.
 # Example: make image EXTRA_TAGS="dev-csgclaw stg-csgclaw"
 EXTRA_TAGS ?=
@@ -25,6 +25,7 @@ PLATFORMS ?= linux/amd64,linux/arm64
 PLATFORM ?= $(shell uname -m | sed -e 's/arm64/linux\/arm64/' -e 's/aarch64/linux\/arm64/' -e 's/x86_64/linux\/amd64/' -e 's/amd64/linux\/amd64/')
 
 CSGCLAW_CLI_DIR := docker/csgclaw-cli
+BUN ?= bun
 
 .PHONY: prepare-csgclaw-cli
 prepare-csgclaw-cli:
@@ -43,9 +44,9 @@ prepare-csgclaw-cli:
 .PHONY: prepare-dist
 prepare-dist:
 	@if [ ! -d node_modules ]; then \
-	  pnpm install --frozen-lockfile; \
+	  $(BUN) install --frozen-lockfile; \
 	fi
-	pnpm run build
+	$(BUN) run build
 
 BUILDX_BUILDER ?= csgclaw-builder
 

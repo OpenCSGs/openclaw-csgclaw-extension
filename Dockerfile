@@ -1,14 +1,17 @@
 # OpenClaw slim + csgclaw-extension baked under /home/node/openclaw-plugins/csgclaw-extension
 #
 # ACR (see Makefile): make image
-#   -> opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsg_public/openclaw:<tag>
+#   -> opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw:<tag>
 # Local: make image-local  -> openclaw-csgclaw:local
 #
 # The Makefile targets `prepare-dist` and `prepare-csgclaw-cli` produce all
 # artifacts on the host before invoking docker build, so this Dockerfile is a
-# pure assembly step (no pnpm/npm/tsc inside the image build).
+# pure assembly step (no package install or TypeScript build inside the image build).
 
 ARG OPENCLAW_BASE_VERSION=2026.3.31
+ARG BUN_IMAGE=oven/bun:1.3.4-debian
+
+FROM ${BUN_IMAGE} AS bun-runtime
 
 # Select the platform-specific csgclaw-cli binary. Pre-built artifacts must
 # exist under docker/csgclaw-cli/ before invoking docker build; the Makefile
@@ -18,6 +21,17 @@ ARG TARGETARCH
 COPY docker/csgclaw-cli/csgclaw-cli_linux_${TARGETARCH} /csgclaw-cli
 
 FROM ghcr.io/openclaw/openclaw:${OPENCLAW_BASE_VERSION}-slim
+
+# Add Bun as the preferred OpenClaw runtime for the CSGClaw image, while keeping
+# the base image's Node binary available for compatibility with Node-specific
+# scripts and OpenClaw internals.
+USER root
+COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+
+# OpenClaw v2026.3.31 probes this path before falling through to dist/entry.js.
+# Node tolerates the missing optional import shape here; Bun needs the shim.
+RUN printf '%s\n' 'export { installProcessWarningFilter } from "./infra/warning-filter.js";' > /app/dist/warning-filter.js
 
 # Bake csgclaw-cli into the image so manager/worker agents do not need to
 # fetch or install it at runtime. Using --chmod keeps a single layer and
@@ -37,7 +51,6 @@ COPY --chown=1000:1000 openclaw.plugin.json /home/node/openclaw-plugins/csgclaw-
 # --no-install-recommends is already the smallest supported bundle that includes the
 # full standard library (urllib, subprocess, ssl, ...). `python3-minimal` alone is too
 # stripped for these scripts. Non-Debian bases (e.g. Alpine apk python3) would differ.
-USER root
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     python3 \
@@ -48,3 +61,10 @@ RUN apt-get update \
 USER 1000
 ENV HOME=/home/node
 WORKDIR /app
+
+HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
+  CMD bun -e "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# Fallback for manual `docker run` and image smoke tests. CSGClaw supplies its
+# own sandbox command, which overrides this CMD and also redirects gateway logs.
+CMD ["bun", "openclaw.mjs", "gateway", "--allow-unconfigured", "--bind", "lan", "--port", "18789"]

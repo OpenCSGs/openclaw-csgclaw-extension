@@ -11,7 +11,7 @@
 #   CSGCLAW_CLI_BASE_URL csgclaw-cli release endpoint
 #   DOCKER_PLATFORMS      buildx platforms, e.g. linux/amd64,linux/arm64
 #   EXTRA_TAGS            additional image tags separated by spaces
-#   NODE_CI_IMAGE         Node.js build image mirrored in ACR
+#   BUN_CI_IMAGE          Bun build/runtime image
 #   GO_CI_IMAGE           Go build image mirrored in ACR
 #   SKIP_BINFMT_INSTALL   set true when the runner host already has qemu
 #
@@ -31,7 +31,7 @@ variables:
   CSGCLAW_CLI_BASE_URL: "https://csgclaw.opencsg.com/releases/latest"
   CI_DOCKER_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3"
   CI_DIND_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3-dind"
-  NODE_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsghq/node:22.13.0-bookworm-slim"
+  BUN_CI_IMAGE: "oven/bun:1.3.4-debian"
   BINFMT_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/binfmt:latest"
   BUILDKIT_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
 
@@ -77,15 +77,14 @@ docker-build-push:
     - docker buildx version
     - |
       set -euo pipefail
-      echo "Building csgclaw-extension dist with ${NODE_CI_IMAGE}"
+      echo "Building csgclaw-extension dist with ${BUN_CI_IMAGE}"
       docker run --rm \
         -v "${CI_PROJECT_DIR}:/work" \
         -w /work \
-        "${NODE_CI_IMAGE}" \
+        "${BUN_CI_IMAGE}" \
         sh -ec '
-          npm install -g pnpm@10.12.1
-          pnpm install --frozen-lockfile
-          pnpm run build
+          bun install --frozen-lockfile
+          bun run build
         '
     - |
       set -euo pipefail
@@ -140,6 +139,7 @@ docker-build-push:
       docker buildx build \
         --platform "${DOCKER_PLATFORMS}" \
         --build-arg "OPENCLAW_BASE_VERSION=${OPENCLAW_BASE_VERSION}" \
+        --build-arg "BUN_IMAGE=${BUN_CI_IMAGE}" \
         ${tag_args} \
         --provenance=false \
         --sbom=false \
@@ -155,10 +155,13 @@ docker-build-push:
         docker run --rm --platform "${platform}" --entrypoint /bin/sh "${DOCKER_IMAGE}:${IMAGE_TAG}" -ec "
           test \"\$(uname -m)\" = \"${expected_arch}\"
           python --version >/dev/null
+          bun --version >/dev/null
           node --version >/dev/null
+          bun /app/openclaw.mjs --version >/dev/null
           /usr/local/bin/csgclaw-cli --help >/dev/null
           test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js
           test -f /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
         "
+      done
   after_script:
     - docker buildx rm "csgclaw-extension-mx-${CI_PIPELINE_ID}" 2>/dev/null || true
