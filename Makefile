@@ -1,5 +1,4 @@
 # ACR image: <registry>/<namespace>/openclaw:<yyyymmdd>.<n>-csgclaw
-# OPENCLAW_BASE_VERSION in Dockerfile selects the upstream ghcr.io/openclaw/openclaw slim base.
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsghq/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
@@ -26,7 +25,13 @@ PLATFORM ?= $(shell uname -m | sed -e 's/arm64/linux\/arm64/' -e 's/aarch64/linu
 
 CSGCLAW_CLI_DIR := docker/csgclaw-cli
 BUN ?= bun
-BUN_IMAGE ?= $(REGISTRY)/opencsghq/bun:1.3.4-debian
+BUN_VERSION ?= 1.3.4
+BUN_IMAGE ?= $(REGISTRY)/opencsghq/bun:$(BUN_VERSION)-debian
+OPENCLAW_BASE_VERSION ?= 2026.3.31
+OPENCLAW_UPSTREAM_IMAGE ?= ghcr.io/openclaw/openclaw:$(OPENCLAW_BASE_VERSION)-slim
+BASE_IMAGE_REPO ?= opencsghq/openclaw-csgclaw-base
+BASE_TAG ?= $(OPENCLAW_BASE_VERSION)-bun$(BUN_VERSION)-py3
+OPENCLAW_BASE_IMAGE ?= $(REGISTRY)/$(BASE_IMAGE_REPO):$(BASE_TAG)
 
 .PHONY: prepare-csgclaw-cli
 prepare-csgclaw-cli:
@@ -51,12 +56,33 @@ prepare-dist:
 
 BUILDX_BUILDER ?= csgclaw-builder
 
+.PHONY: base-image
+base-image:
+	docker buildx build \
+	  --builder $(BUILDX_BUILDER) \
+	  --platform $(PLATFORMS) \
+	  --build-arg OPENCLAW_UPSTREAM_IMAGE=$(OPENCLAW_UPSTREAM_IMAGE) \
+	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
+	  -t $(OPENCLAW_BASE_IMAGE) \
+	  --push \
+	  -f Dockerfile.base .
+
+.PHONY: base-image-local
+base-image-local:
+	docker buildx build \
+	  --platform $(PLATFORM) \
+	  --build-arg OPENCLAW_UPSTREAM_IMAGE=$(OPENCLAW_UPSTREAM_IMAGE) \
+	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
+	  -t openclaw-csgclaw-base:local \
+	  --load \
+	  -f Dockerfile.base .
+
 .PHONY: image
 image: prepare-csgclaw-cli prepare-dist
 	docker buildx build \
 	  --builder $(BUILDX_BUILDER) \
 	  --platform $(PLATFORMS) \
-	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
+	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
 	  $(IMAGE_TAG_ARGS) \
 	  --push .
 
@@ -64,13 +90,17 @@ image: prepare-csgclaw-cli prepare-dist
 image-local: prepare-csgclaw-cli prepare-dist
 	docker buildx build \
 	  --platform $(PLATFORM) \
-	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
+	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
 	  -t openclaw-csgclaw:local \
 	  --load .
 
 .PHONY: image-tags
 image-tags:
 	@printf '%s\n' $(foreach tag,$(IMAGE_TAGS),$(REGISTRY)/$(IMAGE_REPO):$(tag))
+
+.PHONY: base-image-tags
+base-image-tags:
+	@printf '%s\n' $(OPENCLAW_BASE_IMAGE)
 
 .PHONY: promote-image
 promote-image:
