@@ -11,7 +11,8 @@
 #   CSGCLAW_CLI_BASE_URL csgclaw-cli release endpoint
 #   DOCKER_PLATFORMS      buildx platforms, e.g. linux/amd64,linux/arm64
 #   EXTRA_TAGS            additional image tags separated by spaces
-#   BUN_CI_IMAGE          Bun build/runtime image
+#   OPENCLAW_UPSTREAM_IMAGE upstream OpenClaw slim image used for base builds
+#   OPENCLAW_BUILD_IMAGE  Node/pnpm build image for csgclaw-extension dist
 #   OPENCLAW_BASE_IMAGE   pre-baked OpenClaw+CSGClaw runtime base image
 #   OPENCLAW_BASE_TAG     tag for the default pre-baked runtime base image
 #   SKIP_BINFMT_INSTALL   set true when the runner host already has qemu
@@ -29,12 +30,10 @@ variables:
   BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
   DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
   OPENCLAW_BASE_VERSION: "2026.3.31"
-  BUN_VERSION: "1.3.4"
   OPENCLAW_BASE_REPO: "opencsghq/openclaw-csgclaw-base"
   CSGCLAW_CLI_BASE_URL: "https://csgclaw.opencsg.com/releases/latest"
   CI_DOCKER_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3"
   CI_DIND_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3-dind"
-  BUN_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsghq/bun:1.3.4-debian"
   BINFMT_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/binfmt:latest"
   BUILDKIT_CI_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
 
@@ -75,7 +74,9 @@ docker-build-push:
         exit 1
       fi
     - export DOCKER_IMAGE="${ACR_REGISTRY}/opencsghq/openclaw"
-    - export OPENCLAW_BASE_TAG="${OPENCLAW_BASE_TAG:-${OPENCLAW_BASE_VERSION}-bun${BUN_VERSION}-py3}"
+    - export OPENCLAW_UPSTREAM_IMAGE="${OPENCLAW_UPSTREAM_IMAGE:-ghcr.io/openclaw/openclaw:${OPENCLAW_BASE_VERSION}-slim}"
+    - export OPENCLAW_BUILD_IMAGE="${OPENCLAW_BUILD_IMAGE:-${OPENCLAW_UPSTREAM_IMAGE}}"
+    - export OPENCLAW_BASE_TAG="${OPENCLAW_BASE_TAG:-${OPENCLAW_BASE_VERSION}-node24-pnpm10-py3}"
     - export OPENCLAW_BASE_IMAGE="${OPENCLAW_BASE_IMAGE:-${ACR_REGISTRY}/${OPENCLAW_BASE_REPO}:${OPENCLAW_BASE_TAG}}"
     - echo "IMAGE_TAG=${IMAGE_TAG}" && echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
     - echo "OPENCLAW_BASE_IMAGE=${OPENCLAW_BASE_IMAGE}"
@@ -83,14 +84,16 @@ docker-build-push:
     - docker buildx version
     - |
       set -euo pipefail
-      echo "Building csgclaw-extension dist with ${BUN_CI_IMAGE}"
+      echo "Building csgclaw-extension dist with ${OPENCLAW_BUILD_IMAGE}"
       docker run --rm \
+        --user 0:0 \
         -v "${CI_PROJECT_DIR}:/work" \
         -w /work \
-        "${BUN_CI_IMAGE}" \
-        sh -ec '
-          bun install --frozen-lockfile
-          bun run build
+        --entrypoint /bin/sh \
+        "${OPENCLAW_BUILD_IMAGE}" \
+        -ec '
+          pnpm install --frozen-lockfile
+          pnpm run build
         '
     - |
       set -euo pipefail
@@ -143,12 +146,10 @@ docker-build-push:
         cat /tmp/openclaw-base-inspect.err >&2 || true
       fi
       if [ "${base_ready}" != "true" ]; then
-        export OPENCLAW_UPSTREAM_IMAGE="ghcr.io/openclaw/openclaw:${OPENCLAW_BASE_VERSION}-slim"
         echo "Base image missing or incomplete; building ${OPENCLAW_BASE_IMAGE} from ${OPENCLAW_UPSTREAM_IMAGE}"
         docker buildx build \
           --platform "${DOCKER_PLATFORMS}" \
           --build-arg "OPENCLAW_UPSTREAM_IMAGE=${OPENCLAW_UPSTREAM_IMAGE}" \
-          --build-arg "BUN_IMAGE=${BUN_CI_IMAGE}" \
           -t "${OPENCLAW_BASE_IMAGE}" \
           --provenance=false \
           --sbom=false \
@@ -184,9 +185,8 @@ docker-build-push:
         docker run --rm --platform "${platform}" --entrypoint /bin/sh "${DOCKER_IMAGE}:${IMAGE_TAG}" -ec "
           test \"\$(uname -m)\" = \"${expected_arch}\"
           python --version >/dev/null
-          bun --version >/dev/null
           node --version >/dev/null
-          bun /app/openclaw.mjs --version >/dev/null
+          node /app/openclaw.mjs --version >/dev/null
           /usr/local/bin/csgclaw-cli --help >/dev/null
           test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js
           test -f /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
