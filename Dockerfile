@@ -34,6 +34,10 @@ COPY --chown=1000:1000 dist /home/node/openclaw-plugins/csgclaw-extension/dist
 COPY --chown=1000:1000 package.json /home/node/openclaw-plugins/csgclaw-extension/package.json
 COPY --chown=1000:1000 openclaw.plugin.json /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
 
+USER root
+RUN mkdir -p /home/node/.openclaw/workspace/projects \
+  && chown -R 1000:1000 /home/node/.openclaw
+
 USER 1000
 ENV HOME=/home/node
 WORKDIR /app
