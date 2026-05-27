@@ -2,7 +2,7 @@
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsghq/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
-TAG ?= 20260526.1-csgclaw
+TAG ?= 20260527.1-csgclaw
 # Optional additional tags for environment aliases or staged promotion.
 # Example: make image EXTRA_TAGS="dev-csgclaw stg-csgclaw"
 EXTRA_TAGS ?=
@@ -24,13 +24,11 @@ PLATFORMS ?= linux/amd64,linux/arm64
 PLATFORM ?= $(shell uname -m | sed -e 's/arm64/linux\/arm64/' -e 's/aarch64/linux\/arm64/' -e 's/x86_64/linux\/amd64/' -e 's/amd64/linux\/amd64/')
 
 CSGCLAW_CLI_DIR := docker/csgclaw-cli
-BUN ?= bun
-BUN_VERSION ?= 1.3.4
-BUN_IMAGE ?= $(REGISTRY)/opencsghq/bun:$(BUN_VERSION)-debian
+PNPM ?= pnpm
 OPENCLAW_BASE_VERSION ?= 2026.3.31
 OPENCLAW_UPSTREAM_IMAGE ?= ghcr.io/openclaw/openclaw:$(OPENCLAW_BASE_VERSION)-slim
 BASE_IMAGE_REPO ?= opencsghq/openclaw-csgclaw-base
-BASE_TAG ?= $(OPENCLAW_BASE_VERSION)-bun$(BUN_VERSION)-py3
+BASE_TAG ?= $(OPENCLAW_BASE_VERSION)-node24-pnpm10-py3
 OPENCLAW_BASE_IMAGE ?= $(REGISTRY)/$(BASE_IMAGE_REPO):$(BASE_TAG)
 
 .PHONY: prepare-csgclaw-cli
@@ -49,10 +47,8 @@ prepare-csgclaw-cli:
 # suffices for all platforms in PLATFORMS.
 .PHONY: prepare-dist
 prepare-dist:
-	@if [ ! -d node_modules ]; then \
-	  $(BUN) install --frozen-lockfile; \
-	fi
-	$(BUN) run build
+	$(PNPM) install --frozen-lockfile
+	$(PNPM) run build
 
 BUILDX_BUILDER ?= csgclaw-builder
 
@@ -62,7 +58,6 @@ base-image:
 	  --builder $(BUILDX_BUILDER) \
 	  --platform $(PLATFORMS) \
 	  --build-arg OPENCLAW_UPSTREAM_IMAGE=$(OPENCLAW_UPSTREAM_IMAGE) \
-	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
 	  -t $(OPENCLAW_BASE_IMAGE) \
 	  --push \
 	  -f Dockerfile.base .
@@ -72,7 +67,6 @@ base-image-local:
 	docker buildx build \
 	  --platform $(PLATFORM) \
 	  --build-arg OPENCLAW_UPSTREAM_IMAGE=$(OPENCLAW_UPSTREAM_IMAGE) \
-	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
 	  -t openclaw-csgclaw-base:local \
 	  --load \
 	  -f Dockerfile.base .

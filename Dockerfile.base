@@ -2,25 +2,13 @@
 #
 # This image mirrors the upstream OpenClaw slim runtime into ACR and bakes in
 # stable runtime dependencies used by every csgclaw-extension image build:
-# Bun, the Bun/OpenClaw warning-filter shim, Python, and CA certificates.
+# Python and CA certificates. Node 24 and pnpm come from the upstream image.
 
 ARG OPENCLAW_UPSTREAM_IMAGE=ghcr.io/openclaw/openclaw:2026.3.31-slim
-ARG BUN_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/bun:1.3.4-debian
-
-FROM ${BUN_IMAGE} AS bun-runtime
 
 FROM ${OPENCLAW_UPSTREAM_IMAGE}
 
-# Add Bun as the preferred OpenClaw runtime for the CSGClaw image, while keeping
-# the base image's Node binary available for compatibility with Node-specific
-# scripts and OpenClaw internals.
 USER root
-COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
-RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
-
-# OpenClaw v2026.3.31 probes this path before falling through to dist/entry.js.
-# Node tolerates the missing optional import shape here; Bun needs the shim.
-RUN printf '%s\n' 'export { installProcessWarningFilter } from "./infra/warning-filter.js";' > /app/dist/warning-filter.js
 
 # Python for workspace skills (e.g. manager-worker-dispatch): Debian `python3` with
 # --no-install-recommends is already the smallest supported bundle that includes the

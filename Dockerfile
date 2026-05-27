@@ -9,7 +9,7 @@
 # artifacts on the host before invoking docker build. Runtime dependencies are
 # baked into Dockerfile.base, so this Dockerfile stays a pure assembly step.
 
-ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.3.31-bun1.3.4-py3
+ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.3.31-node24-pnpm10-py3
 
 # Select the platform-specific csgclaw-cli binary. Pre-built artifacts must
 # exist under docker/csgclaw-cli/ before invoking docker build; the Makefile
@@ -39,8 +39,8 @@ ENV HOME=/home/node
 WORKDIR /app
 
 HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
-  CMD bun -e "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Fallback for manual `docker run` and image smoke tests. CSGClaw supplies its
 # own sandbox command, which overrides this CMD and also redirects gateway logs.
-CMD ["bun", "openclaw.mjs", "gateway", "--allow-unconfigured", "--bind", "lan", "--port", "18789"]
+CMD ["node", "openclaw.mjs", "gateway", "--allow-unconfigured", "--bind", "lan", "--port", "18789"]
