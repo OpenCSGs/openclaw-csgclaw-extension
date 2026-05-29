@@ -15,6 +15,7 @@
 #   OPENCLAW_BUILD_IMAGE  Node/pnpm build image for csgclaw-extension dist
 #   OPENCLAW_BASE_IMAGE   pre-baked OpenClaw+CSGClaw runtime base image
 #   OPENCLAW_BASE_TAG     tag for the default pre-baked runtime base image
+#   OPENCLAW_FEISHU_VERSION Feishu plugin npm version (defaults to OPENCLAW_BASE_VERSION)
 #   SKIP_BINFMT_INSTALL   set true when the runner host already has qemu
 #
 # Trigger: push a Git tag. The exact Git tag is used as the Docker image tag,
@@ -29,7 +30,7 @@ variables:
   DOCKER_BUILDKIT: "1"
   BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
   DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
-  OPENCLAW_BASE_VERSION: "2026.3.31"
+  OPENCLAW_BASE_VERSION: "2026.5.26"
   OPENCLAW_BASE_REPO: "opencsghq/openclaw-csgclaw-base"
   CSGCLAW_CLI_BASE_URL: "https://csgclaw.opencsg.com/releases/latest"
   CI_DOCKER_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3"
@@ -73,13 +74,24 @@ docker-build-push:
         echo "Use only letters, digits, underscore, dot, and dash; do not use slash." >&2
         exit 1
       fi
+      for tag in ${EXTRA_TAGS:-}; do
+        if ! printf '%s' "${tag}" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+          echo "EXTRA_TAGS entry '${tag}' is not a valid Docker tag." >&2
+          echo "Use only letters, digits, underscore, dot, and dash; do not use slash." >&2
+          exit 1
+        fi
+      done
     - export DOCKER_IMAGE="${ACR_REGISTRY}/opencsghq/openclaw"
     - export OPENCLAW_UPSTREAM_IMAGE="${OPENCLAW_UPSTREAM_IMAGE:-ghcr.io/openclaw/openclaw:${OPENCLAW_BASE_VERSION}-slim}"
     - export OPENCLAW_BUILD_IMAGE="${OPENCLAW_BUILD_IMAGE:-${OPENCLAW_UPSTREAM_IMAGE}}"
     - export OPENCLAW_BASE_TAG="${OPENCLAW_BASE_TAG:-${OPENCLAW_BASE_VERSION}-node24-pnpm10-py3}"
     - export OPENCLAW_BASE_IMAGE="${OPENCLAW_BASE_IMAGE:-${ACR_REGISTRY}/${OPENCLAW_BASE_REPO}:${OPENCLAW_BASE_TAG}}"
+    - export OPENCLAW_FEISHU_VERSION="${OPENCLAW_FEISHU_VERSION:-${OPENCLAW_BASE_VERSION}}"
     - echo "IMAGE_TAG=${IMAGE_TAG}" && echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
+    - echo "OPENCLAW_UPSTREAM_IMAGE=${OPENCLAW_UPSTREAM_IMAGE}"
+    - echo "OPENCLAW_BUILD_IMAGE=${OPENCLAW_BUILD_IMAGE}"
     - echo "OPENCLAW_BASE_IMAGE=${OPENCLAW_BASE_IMAGE}"
+    - echo "OPENCLAW_FEISHU_VERSION=${OPENCLAW_FEISHU_VERSION}"
     - docker info
     - docker buildx version
     - |
@@ -170,6 +182,7 @@ docker-build-push:
       docker buildx build \
         --platform "${DOCKER_PLATFORMS}" \
         --build-arg "OPENCLAW_BASE_IMAGE=${OPENCLAW_BASE_IMAGE}" \
+        --build-arg "OPENCLAW_FEISHU_VERSION=${OPENCLAW_FEISHU_VERSION}" \
         ${tag_args} \
         --provenance=false \
         --sbom=false \
@@ -187,9 +200,45 @@ docker-build-push:
           python --version >/dev/null
           node --version >/dev/null
           node /app/openclaw.mjs --version >/dev/null
-          /usr/local/bin/csgclaw-cli --help >/dev/null
+          /usr/local/bin/csgclaw-cli --help >/dev/null 2>&1
           test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js
           test -f /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
+          test -L /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw
+          test \"\$(readlink /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw)\" = \"/app\"
+          test -f /home/node/openclaw-plugins/feishu/dist/index.js
+          test -f /home/node/openclaw-plugins/feishu/dist/setup-entry.js
+          test -f /home/node/openclaw-plugins/feishu/openclaw.plugin.json
+          test -L /home/node/openclaw-plugins/feishu/node_modules/openclaw
+          test \"\$(readlink /home/node/openclaw-plugins/feishu/node_modules/openclaw)\" = \"/app\"
+          node --input-type=module -e '
+            import fs from \"node:fs\";
+            const pkg = JSON.parse(fs.readFileSync(\"/home/node/openclaw-plugins/feishu/package.json\", \"utf8\"));
+            if (pkg.openclaw?.extensions?.[0] !== \"./dist/index.js\") throw new Error(\"bad feishu extension entry\");
+            if (pkg.openclaw?.setupEntry !== \"./dist/setup-entry.js\") throw new Error(\"bad feishu setup entry\");
+            await import(\"file:///home/node/openclaw-plugins/feishu/dist/index.js\");
+          '
+          node --input-type=module -e '
+            const { loadOpenClawPlugins } = await import(\"/app/dist/plugins/loader.js\");
+            const config = {
+              channels: {
+                csgclaw: { enabled: true, baseUrl: \"http://127.0.0.1:18080\", botId: \"ci\" },
+                feishu: {
+                  enabled: true,
+                  defaultAccount: \"ci\",
+                  accounts: { ci: { enabled: true, appId: \"cli_a_ci\", appSecret: \"ci-secret\" } }
+                }
+              },
+              plugins: {
+                load: { paths: [\"/home/node/openclaw-plugins\"] },
+                entries: { csgclaw: { enabled: true }, feishu: { enabled: true } }
+              }
+            };
+            const registry = loadOpenClawPlugins({ config, cache: false, throwOnLoadError: false, env: process.env });
+            for (const id of [\"csgclaw\", \"feishu\"]) {
+              const plugin = registry.plugins.find((entry) => entry.id === id);
+              if (!plugin || plugin.status !== \"loaded\") throw new Error(id + \" not loaded: \" + (plugin?.error ?? \"missing\"));
+            }
+          '
         "
       done
   after_script:
