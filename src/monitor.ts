@@ -1,6 +1,7 @@
 import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { ChannelGatewayContext } from "openclaw/plugin-sdk";
+import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import type { ResolvedCsgclawAccount } from "./config.js";
 import { eventsUrl, feishuEventsUrl, feishuMessagesUrl } from "./config.js";
@@ -30,6 +31,8 @@ type CsgclawFeishuSsePayload = {
     mentions?: Array<{ id?: string; name?: string }>;
   };
 };
+
+type ChannelRuntimeCore = PluginRuntime["channel"];
 
 function readBoolean(v: unknown): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
@@ -230,11 +233,11 @@ export async function postFeishuSend(
 
 export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<ResolvedCsgclawAccount>) {
   const account = ctx.account;
-  const core = ctx.channelRuntime;
-  if (!core) {
+  if (!ctx.channelRuntime) {
     ctx.log?.warn?.("csgclaw: channelRuntime missing; cannot dispatch inbound replies");
     return;
   }
+  const core = ctx.channelRuntime as ChannelRuntimeCore;
 
   const url = eventsUrl(account);
   const headers: Record<string, string> = {};
@@ -379,11 +382,11 @@ export async function monitorCsgclawFeishuProvider(
   ctx: ChannelGatewayContext<ResolvedCsgclawAccount>,
 ) {
   const account = ctx.account;
-  const core = ctx.channelRuntime;
-  if (!core) {
+  if (!ctx.channelRuntime) {
     ctx.log?.warn?.("csgclaw-feishu: channelRuntime missing; cannot dispatch inbound replies");
     return;
   }
+  const core = ctx.channelRuntime as ChannelRuntimeCore;
 
   const cfg = ctx.cfg as OpenClawConfig;
   if (!isCsgclawFeishuBridgeConfigured(cfg, account.botId)) {

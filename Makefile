@@ -2,7 +2,7 @@
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsghq/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
-TAG ?= 20260527.1-csgclaw
+TAG ?= 20260529.2-csgclaw
 # Optional additional tags for environment aliases or staged promotion.
 # Example: make image EXTRA_TAGS="dev-csgclaw stg-csgclaw"
 EXTRA_TAGS ?=
@@ -25,8 +25,9 @@ PLATFORM ?= $(shell uname -m | sed -e 's/arm64/linux\/arm64/' -e 's/aarch64/linu
 
 CSGCLAW_CLI_DIR := docker/csgclaw-cli
 PNPM ?= pnpm
-OPENCLAW_BASE_VERSION ?= 2026.3.31
+OPENCLAW_BASE_VERSION ?= 2026.5.26
 OPENCLAW_UPSTREAM_IMAGE ?= ghcr.io/openclaw/openclaw:$(OPENCLAW_BASE_VERSION)-slim
+OPENCLAW_FEISHU_VERSION ?= $(OPENCLAW_BASE_VERSION)
 BASE_IMAGE_REPO ?= opencsghq/openclaw-csgclaw-base
 BASE_TAG ?= $(OPENCLAW_BASE_VERSION)-node24-pnpm10-py3
 OPENCLAW_BASE_IMAGE ?= $(REGISTRY)/$(BASE_IMAGE_REPO):$(BASE_TAG)
@@ -77,6 +78,7 @@ image: prepare-csgclaw-cli prepare-dist
 	  --builder $(BUILDX_BUILDER) \
 	  --platform $(PLATFORMS) \
 	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
+	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
 	  $(IMAGE_TAG_ARGS) \
 	  --push .
 
@@ -85,6 +87,7 @@ image-local: prepare-csgclaw-cli prepare-dist
 	docker buildx build \
 	  --platform $(PLATFORM) \
 	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
+	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
 	  -t openclaw-csgclaw:local \
 	  --load .
 

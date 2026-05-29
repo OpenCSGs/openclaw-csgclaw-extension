@@ -5,11 +5,12 @@
 #   -> opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw:<tag>
 # Local: make image-local  -> openclaw-csgclaw:local
 #
-# The Makefile targets `prepare-dist` and `prepare-csgclaw-cli` produce all
-# artifacts on the host before invoking docker build. Runtime dependencies are
-# baked into Dockerfile.base, so this Dockerfile stays a pure assembly step.
+# The Makefile targets `prepare-dist` and `prepare-csgclaw-cli` produce CSGClaw
+# artifacts on the host before invoking docker build. Feishu is installed as a
+# normal OpenClaw plugin package during this image build.
 
-ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.3.31-node24-pnpm10-py3
+ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.5.26-node24-pnpm10-py3
+ARG OPENCLAW_FEISHU_VERSION=2026.5.26
 
 # Select the platform-specific csgclaw-cli binary. Pre-built artifacts must
 # exist under docker/csgclaw-cli/ before invoking docker build; the Makefile
@@ -19,6 +20,7 @@ ARG TARGETARCH
 COPY docker/csgclaw-cli/csgclaw-cli_linux_${TARGETARCH} /csgclaw-cli
 
 FROM ${OPENCLAW_BASE_IMAGE}
+ARG OPENCLAW_FEISHU_VERSION
 
 # Bake csgclaw-cli into the image so manager/worker agents do not need to
 # fetch or install it at runtime. Using --chmod keeps a single layer and
@@ -36,10 +38,26 @@ COPY --chown=1000:1000 openclaw.plugin.json /home/node/openclaw-plugins/csgclaw-
 
 USER root
 RUN mkdir -p /home/node/.openclaw/workspace/projects \
-  && chown -R 1000:1000 /home/node/.openclaw
+  && mkdir -p /home/node/openclaw-plugins/feishu \
+  && mkdir -p /home/node/openclaw-plugins/csgclaw-extension/node_modules \
+  && ln -sfn /app /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw \
+  && chown -R 1000:1000 /home/node/.openclaw /home/node/openclaw-plugins
+
+ENV HOME=/home/node
 
 USER 1000
-ENV HOME=/home/node
+RUN set -eux; \
+  tmpdir="$(mktemp -d)"; \
+  cd "$tmpdir"; \
+  npm pack --silent "@openclaw/feishu@${OPENCLAW_FEISHU_VERSION}"; \
+  tarball="$(find "$tmpdir" -maxdepth 1 -name '*.tgz' -print -quit)"; \
+  tar -xzf "$tarball" -C /home/node/openclaw-plugins/feishu --strip-components=1; \
+  cd /home/node/openclaw-plugins/feishu; \
+  node -e "const fs=require('node:fs'); const p='package.json'; const pkg=JSON.parse(fs.readFileSync(p,'utf8')); pkg.openclaw = pkg.openclaw || {}; pkg.openclaw.extensions = pkg.openclaw.runtimeExtensions || pkg.openclaw.extensions; pkg.openclaw.setupEntry = pkg.openclaw.runtimeSetupEntry || pkg.openclaw.setupEntry; fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');"; \
+  npm install --omit=dev --ignore-scripts --no-audit --no-fund --legacy-peer-deps --package-lock=false; \
+  ln -sfn /app node_modules/openclaw; \
+  rm -rf "$tmpdir"
+
 WORKDIR /app
 
 HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \

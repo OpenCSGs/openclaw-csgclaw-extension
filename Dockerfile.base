@@ -4,7 +4,7 @@
 # stable runtime dependencies used by every csgclaw-extension image build:
 # Python and CA certificates. Node 24 and pnpm come from the upstream image.
 
-ARG OPENCLAW_UPSTREAM_IMAGE=ghcr.io/openclaw/openclaw:2026.3.31-slim
+ARG OPENCLAW_UPSTREAM_IMAGE=ghcr.io/openclaw/openclaw:2026.5.26-slim
 
 FROM ${OPENCLAW_UPSTREAM_IMAGE}
 

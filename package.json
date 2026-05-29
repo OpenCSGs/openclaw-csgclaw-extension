@@ -15,11 +15,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "openclaw": "2026.3.31",
+    "openclaw": "2026.5.26",
     "typescript": "^5.7.2"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.3.31"
+    "openclaw": ">=2026.5.26"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -40,7 +40,7 @@
     "install": {
       "npmSpec": "csgclaw-extension",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.3.31"
+      "minHostVersion": ">=2026.5.26"
     }
   }
 }
