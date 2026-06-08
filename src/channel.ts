@@ -44,7 +44,7 @@ const pluginBase = createChannelPluginBase<ResolvedCsgclawAccount>({
     listAccountIds: listCsgclawAccountIds,
     resolveAccount: resolveCsgclawAccount,
     isEnabled: (account) => account.enabled,
-    isConfigured: (account) => Boolean(account.baseUrl && account.botId),
+    isConfigured: (account) => Boolean(account.baseUrl && account.participantId),
   },
   setup: {
     applyAccountConfig: ({ cfg }) => cfg,

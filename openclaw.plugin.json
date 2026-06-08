@@ -3,7 +3,7 @@
   "kind": "channel",
   "channels": ["csgclaw"],
   "name": "CSGClaw",
-  "description": "CSGClaw IM bridge (CSGClaw bot bridge API).",
+  "description": "CSGClaw participant bridge (SSE + REST).",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

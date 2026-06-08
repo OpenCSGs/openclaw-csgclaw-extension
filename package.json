@@ -1,7 +1,7 @@
 {
   "name": "csgclaw-extension",
-  "version": "0.3.9-ext.1",
-  "description": "OpenClaw channel plugin: CSGClaw IM bridge (SSE + REST)",
+  "version": "0.3.9-ext.2",
+  "description": "OpenClaw channel plugin: CSGClaw participant bridge (SSE + REST)",
   "type": "module",
   "main": "dist/index.js",
   "files": ["dist", "openclaw.plugin.json"],
@@ -36,7 +36,7 @@
       "id": "csgclaw",
       "label": "CSGClaw",
       "selectionLabel": "CSGClaw (IM bridge)",
-      "blurb": "Gateway connects to CSGClaw via bot SSE and REST.",
+      "blurb": "Gateway connects to CSGClaw via participant SSE and REST.",
       "order": 15,
       "quickstartAllowFrom": true
     },

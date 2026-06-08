@@ -11,7 +11,7 @@
 
 ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.5.26-node24-pnpm10-py3
 ARG OPENCLAW_FEISHU_VERSION=2026.5.26
-ARG CSGCLAW_EXTENSION_VERSION=0.3.9-ext.1
+ARG CSGCLAW_EXTENSION_VERSION=0.3.9-ext.2
 
 # Select the platform-specific csgclaw-cli binary. Pre-built artifacts must
 # exist under docker/csgclaw-cli/ before invoking docker build; the Makefile

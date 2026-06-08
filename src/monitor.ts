@@ -4,17 +4,34 @@ import type { ChannelGatewayContext } from "openclaw/plugin-sdk";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import type { ResolvedCsgclawAccount } from "./config.js";
-import { eventsUrl, feishuEventsUrl, feishuMessagesUrl } from "./config.js";
+import {
+  eventsUrl,
+  feishuEventsUrl,
+  feishuMessagesUrl,
+  messagesUrl,
+  resolveFeishuAccountId,
+} from "./config.js";
 import { consumeSseStream } from "./sse.js";
+
+type CsgclawEventContext = {
+  channel?: string;
+  account?: string;
+  chat_id?: string;
+  chat_type?: string;
+  topic_id?: string;
+};
 
 type CsgclawSsePayload = {
   message_id?: string;
   room_id?: string;
+  chat_id?: string;
   chat_type?: string;
+  thread_root_id?: string;
   sender?: { id?: string; username?: string; display_name?: string };
   text?: string;
   timestamp?: string;
   mentions?: string[];
+  context?: CsgclawEventContext;
 };
 
 type CsgclawFeishuSsePayload = {
@@ -67,25 +84,25 @@ function parseTimestampMs(v: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function isCsgclawFeishuBridgeConfigured(cfg: OpenClawConfig, botId: string): boolean {
+export function isCsgclawFeishuBridgeConfigured(cfg: OpenClawConfig, participantId: string): boolean {
   const channels = readRecord(cfg.channels);
   const feishu = readRecord(channels?.feishu);
   if (!feishu || feishu.enabled === false) {
     return false;
   }
 
-  const normalizedBotId = botId.trim();
-  if (!normalizedBotId) {
+  const feishuAccountId = resolveFeishuAccountId(cfg, participantId);
+  if (!feishuAccountId) {
     return false;
   }
 
   const accounts = readRecord(feishu.accounts);
-  const account = readRecord(accounts?.[normalizedBotId]);
+  const account = readRecord(accounts?.[feishuAccountId]);
   if (account) {
     return account.enabled !== false;
   }
 
-  return readString(feishu.defaultAccount) === normalizedBotId;
+  return readString(feishu.defaultAccount) === feishuAccountId;
 }
 
 function feishuBodyForAgent(params: {
@@ -163,6 +180,48 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function resolvedRoomId(payload: CsgclawSsePayload): string {
+  const roomId = readString(payload.room_id);
+  if (roomId) {
+    return roomId;
+  }
+  const chatId = readString(payload.chat_id);
+  if (chatId) {
+    return chatId;
+  }
+  return readString(payload.context?.chat_id);
+}
+
+function resolvedTopicId(payload: CsgclawSsePayload): string {
+  const topicId = readString(payload.context?.topic_id);
+  if (topicId) {
+    return topicId;
+  }
+  return readString(payload.thread_root_id);
+}
+
+function topicChatId(roomId: string, topicId: string): string {
+  if (!roomId || !topicId) {
+    return roomId;
+  }
+  return `${roomId}/${topicId}`;
+}
+
+export function splitTopicChatId(chatId: string): { roomId: string; topicId: string } {
+  const trimmed = chatId.trim();
+  if (!trimmed) {
+    return { roomId: "", topicId: "" };
+  }
+  const idx = trimmed.lastIndexOf("/");
+  if (idx <= 0 || idx === trimmed.length - 1) {
+    return { roomId: trimmed, topicId: "" };
+  }
+  return {
+    roomId: trimmed.slice(0, idx).trim(),
+    topicId: trimmed.slice(idx + 1).trim(),
+  };
+}
+
 export function roomIdFromOutboundTo(to: string): string {
   const t = to.trim();
   const m = /^csgclaw:room:(.+)$/i.exec(t);
@@ -172,26 +231,139 @@ export function roomIdFromOutboundTo(to: string): string {
   return t;
 }
 
+function inboundMentionIds(payload: CsgclawSsePayload, participantId: string): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  const add = (id: string) => {
+    const normalized = id.trim();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    ids.push(normalized);
+  };
+  add(participantId);
+  add(readString(payload.context?.account));
+  for (const mention of payload.mentions ?? []) {
+    add(mention);
+  }
+  return ids;
+}
+
+function hasInboundBotAtMention(content: string, botId: string): boolean {
+  const normalizedContent = content.trim();
+  const normalizedBotId = botId.trim();
+  if (!normalizedContent || !normalizedBotId) {
+    return false;
+  }
+
+  const prefix = `<at user_id="`;
+  let searchFrom = 0;
+  while (true) {
+    const start = normalizedContent.indexOf(prefix, searchFrom);
+    if (start < 0) {
+      return false;
+    }
+    const valueStart = start + prefix.length;
+    const end = normalizedContent.indexOf('"', valueStart);
+    if (end < 0) {
+      return false;
+    }
+    if (normalizedContent.slice(valueStart, end).trim() === normalizedBotId) {
+      return true;
+    }
+    searchFrom = end + 1;
+  }
+}
+
+function hasInboundAtMention(content: string): boolean {
+  return content.trim().includes(`<at user_id="`);
+}
+
+function normalizeInboundAtMentions(content: string): string {
+  if (!content) {
+    return content;
+  }
+
+  const openTag = "<at";
+  const closeTag = "</at>";
+  let searchFrom = 0;
+  let normalized = "";
+
+  while (searchFrom < content.length) {
+    const start = content.indexOf(openTag, searchFrom);
+    if (start < 0) {
+      normalized += content.slice(searchFrom);
+      break;
+    }
+    normalized += content.slice(searchFrom, start);
+
+    const tagEnd = content.indexOf(">", start);
+    if (tagEnd < 0) {
+      normalized += content.slice(start);
+      break;
+    }
+
+    const closeStart = content.indexOf(closeTag, tagEnd + 1);
+    if (closeStart < 0) {
+      normalized += content.slice(start);
+      break;
+    }
+
+    const mentionName = content.slice(tagEnd + 1, closeStart).trim();
+    normalized += mentionName ? `@${mentionName}` : content.slice(start, closeStart + closeTag.length);
+    searchFrom = closeStart + closeTag.length;
+  }
+
+  return normalized;
+}
+
+function isInboundBotMentioned(
+  payload: CsgclawSsePayload,
+  participantId: string,
+  content: string,
+): boolean {
+  for (const id of inboundMentionIds(payload, participantId)) {
+    if (hasInboundBotAtMention(content, id)) {
+      return true;
+    }
+  }
+  return Array.isArray(payload.mentions) && payload.mentions.length > 0;
+}
+
 export async function postSend(
   account: ResolvedCsgclawAccount,
-  roomId: string,
+  chatId: string,
   text: string,
 ): Promise<string> {
-  const url = `${account.baseUrl}/api/bots/${encodeURIComponent(account.botId)}/messages/send`;
+  const { roomId, topicId } = splitTopicChatId(chatId);
+  const url = messagesUrl(account);
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (account.accessToken) {
     headers.Authorization = `Bearer ${account.accessToken}`;
   }
+  const body: Record<string, string | Record<string, string>> = {
+    room_id: roomId,
+    text,
+  };
+  if (topicId) {
+    body.topic_id = topicId;
+    body.context = {
+      channel: "csgclaw",
+      chat_id: roomId,
+      topic_id: topicId,
+    };
+  }
   const res = await fetch(url, {
     method: "POST",
     headers,
-    body: JSON.stringify({ room_id: roomId, text }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`csgclaw send: HTTP ${res.status} ${body}`);
+    const responseBody = await res.text().catch(() => "");
+    throw new Error(`csgclaw send: HTTP ${res.status} ${responseBody}`);
   }
   const json = (await res.json()) as { message_id?: string };
   return json.message_id ?? "";
@@ -199,6 +371,7 @@ export async function postSend(
 
 export async function postFeishuSend(
   account: ResolvedCsgclawAccount,
+  cfg: OpenClawConfig,
   roomId: string,
   text: string,
   mentionBotId?: string,
@@ -209,13 +382,14 @@ export async function postFeishuSend(
   if (account.accessToken) {
     headers.Authorization = `Bearer ${account.accessToken}`;
   }
+  const feishuAccountId = resolveFeishuAccountId(cfg, account.participantId);
   const mentionId = mentionBotId?.trim();
   const body: Record<string, string> = {
     room_id: roomId,
-    sender_id: account.botId,
+    sender_id: feishuAccountId,
     content: text,
   };
-  if (mentionId && mentionId !== account.botId) {
+  if (mentionId && mentionId !== feishuAccountId) {
     body.mention_id = mentionId;
   }
   const res = await fetch(feishuMessagesUrl(account), {
@@ -224,8 +398,8 @@ export async function postFeishuSend(
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`csgclaw feishu send: HTTP ${res.status} ${body}`);
+    const responseBody = await res.text().catch(() => "");
+    throw new Error(`csgclaw feishu send: HTTP ${res.status} ${responseBody}`);
   }
   const json = (await res.json()) as { id?: string; message_id?: string };
   return json.id ?? json.message_id ?? "";
@@ -240,7 +414,10 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
   const core = ctx.channelRuntime as ChannelRuntimeCore;
 
   const url = eventsUrl(account);
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    Accept: "text/event-stream",
+    "Cache-Control": "no-cache",
+  };
   if (account.accessToken) {
     headers.Authorization = `Bearer ${account.accessToken}`;
   }
@@ -263,18 +440,30 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
           } catch {
             return;
           }
-          const roomId = payload.room_id?.trim();
-          const text = payload.text ?? "";
+
+          const roomId = resolvedRoomId(payload);
+          const topicId = resolvedTopicId(payload);
+          const chatId = topicChatId(roomId, topicId);
           const senderId = payload.sender?.id?.trim() ?? "";
           if (!roomId || !senderId) {
             return;
           }
 
+          let rawBody = payload.text ?? "";
           const chatType =
             payload.chat_type === "direct" || payload.chat_type === "group"
               ? payload.chat_type
               : "group";
-          const wasMentioned = Array.isArray(payload.mentions) && payload.mentions.length > 0;
+
+          let wasMentioned = isInboundBotMentioned(payload, account.participantId, rawBody);
+          if (chatType === "group") {
+            if (!wasMentioned && hasInboundAtMention(rawBody)) {
+              ctx.log?.debug?.("csgclaw: skipped group message with unrelated @ mention");
+              return;
+            }
+            rawBody = normalizeInboundAtMentions(rawBody);
+            wasMentioned = isInboundBotMentioned(payload, account.participantId, rawBody);
+          }
 
           if (
             !shouldDispatchCsgclawInbound({
@@ -292,10 +481,9 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             cfg,
             channel: "csgclaw",
             accountId: ctx.accountId,
-            peer: { kind: chatType, id: roomId },
+            peer: { kind: chatType, id: chatId },
           });
 
-          const rawBody = text;
           const body = core.reply.formatAgentEnvelope({
             channel: "CSGClaw",
             from: payload.sender?.display_name || payload.sender?.username || senderId,
@@ -310,11 +498,11 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             RawBody: rawBody,
             CommandBody: rawBody,
             From: `csgclaw:user:${senderId}`,
-            To: `csgclaw:room:${roomId}`,
+            To: `csgclaw:room:${chatId}`,
             SessionKey: route.sessionKey,
             AccountId: route.accountId,
             ChatType: chatType,
-            ConversationLabel: roomId,
+            ConversationLabel: chatId,
             SenderName: payload.sender?.display_name ?? payload.sender?.username ?? senderId,
             SenderId: senderId,
             SenderUsername: payload.sender?.username ?? senderId,
@@ -322,7 +510,7 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             Surface: "csgclaw",
             MessageSid: payload.message_id ?? "",
             OriginatingChannel: "csgclaw",
-            OriginatingTo: `csgclaw:room:${roomId}`,
+            OriginatingTo: `csgclaw:room:${chatId}`,
             CommandAuthorized: true,
             WasMentioned: wasMentioned,
           });
@@ -357,7 +545,7 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
                 if (!out) {
                   return;
                 }
-                await postSend(account, roomId, out);
+                await postSend(account, chatId, out);
               },
             },
             replyOptions: { onModelSelected },
@@ -389,13 +577,17 @@ export async function monitorCsgclawFeishuProvider(
   const core = ctx.channelRuntime as ChannelRuntimeCore;
 
   const cfg = ctx.cfg as OpenClawConfig;
-  if (!isCsgclawFeishuBridgeConfigured(cfg, account.botId)) {
-    ctx.log?.debug?.("csgclaw-feishu: channels.feishu not configured for this bot; skip bridge");
+  if (!isCsgclawFeishuBridgeConfigured(cfg, account.participantId)) {
+    ctx.log?.debug?.("csgclaw-feishu: channels.feishu not configured for this participant; skip bridge");
     return;
   }
 
+  const feishuAccountId = resolveFeishuAccountId(cfg, account.participantId);
   const url = feishuEventsUrl(account);
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    Accept: "text/event-stream",
+    "Cache-Control": "no-cache",
+  };
   if (account.accessToken) {
     headers.Authorization = `Bearer ${account.accessToken}`;
   }
@@ -431,7 +623,7 @@ export async function monitorCsgclawFeishuProvider(
           const route = core.routing.resolveAgentRoute({
             cfg,
             channel: "feishu",
-            accountId: account.botId,
+            accountId: feishuAccountId,
             peer: { kind: "group", id: roomId },
           });
 
@@ -489,7 +681,7 @@ export async function monitorCsgclawFeishuProvider(
             cfg,
             agentId: route.agentId,
             channel: "feishu",
-            accountId: account.botId,
+            accountId: feishuAccountId,
           });
 
           await core.reply.dispatchReplyWithBufferedBlockDispatcher({
@@ -502,7 +694,7 @@ export async function monitorCsgclawFeishuProvider(
                 if (!out) {
                   return;
                 }
-                await postFeishuSend(account, roomId, out, replyMentionBotId);
+                await postFeishuSend(account, cfg, roomId, out, replyMentionBotId);
               },
             },
             replyOptions: { onModelSelected },
