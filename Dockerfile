@@ -1,16 +1,17 @@
-# OpenClaw CSGClaw runtime base + csgclaw-extension baked under
+# OpenClaw CSGClaw runtime base + csgclaw-extension installed from npm under
 # /home/node/openclaw-plugins/csgclaw-extension
 #
 # ACR (see Makefile): make image
 #   -> opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw:<tag>
 # Local: make image-local  -> openclaw-csgclaw:local
 #
-# The Makefile targets `prepare-dist` and `prepare-csgclaw-cli` produce CSGClaw
-# artifacts on the host before invoking docker build. Feishu is installed as a
-# normal OpenClaw plugin package during this image build.
+# The Makefile target `prepare-csgclaw-cli` produces csgclaw-cli artifacts on
+# the host before invoking docker build. OpenClaw plugins are installed from npm
+# during the image build.
 
 ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.5.26-node24-pnpm10-py3
 ARG OPENCLAW_FEISHU_VERSION=2026.5.26
+ARG CSGCLAW_EXTENSION_VERSION=0.3.9-ext.1
 
 # Select the platform-specific csgclaw-cli binary. Pre-built artifacts must
 # exist under docker/csgclaw-cli/ before invoking docker build; the Makefile
@@ -21,32 +22,31 @@ COPY docker/csgclaw-cli/csgclaw-cli_linux_${TARGETARCH} /csgclaw-cli
 
 FROM ${OPENCLAW_BASE_IMAGE}
 ARG OPENCLAW_FEISHU_VERSION
+ARG CSGCLAW_EXTENSION_VERSION
 
 # Bake csgclaw-cli into the image so manager/worker agents do not need to
 # fetch or install it at runtime. Using --chmod keeps a single layer and
 # avoids switching to root/back to node 1000.
 COPY --from=csgclaw-cli --chmod=0755 /csgclaw-cli /usr/local/bin/csgclaw-cli
 
-# Drop pre-built csgclaw-extension straight into the OpenClaw plugins dir.
-# The plugin is pure TypeScript and has no runtime npm dependencies (see
-# csgclaw-extension/package.json), so OpenClaw discovers it via
-# plugins.load.paths without an install step. dist/ is built on the host
-# by `make prepare-dist` before docker build.
-COPY --chown=0:0 dist /home/node/openclaw-plugins/csgclaw-extension/dist
-COPY --chown=0:0 package.json /home/node/openclaw-plugins/csgclaw-extension/package.json
-COPY --chown=0:0 openclaw.plugin.json /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
-
 USER root
 RUN mkdir -p /home/node/.openclaw/workspace/projects \
+  && mkdir -p /home/node/openclaw-plugins/csgclaw-extension \
   && mkdir -p /home/node/openclaw-plugins/feishu \
-  && mkdir -p /home/node/openclaw-plugins/csgclaw-extension/node_modules \
-  && ln -sfn /app /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw \
-  && chown -R 1000:1000 /home/node/.openclaw /home/node/openclaw-plugins/feishu
+  && chown -R 1000:1000 /home/node/.openclaw /home/node/openclaw-plugins
 
 ENV HOME=/home/node
 
 USER 1000
 RUN set -eux; \
+  tmpdir="$(mktemp -d)"; \
+  cd "$tmpdir"; \
+  npm pack --silent "csgclaw-extension@${CSGCLAW_EXTENSION_VERSION}"; \
+  tarball="$(find "$tmpdir" -maxdepth 1 -name '*.tgz' -print -quit)"; \
+  tar -xzf "$tarball" -C /home/node/openclaw-plugins/csgclaw-extension --strip-components=1; \
+  mkdir -p /home/node/openclaw-plugins/csgclaw-extension/node_modules; \
+  ln -sfn /app /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw; \
+  rm -rf "$tmpdir"; \
   tmpdir="$(mktemp -d)"; \
   cd "$tmpdir"; \
   npm pack --silent "@openclaw/feishu@${OPENCLAW_FEISHU_VERSION}"; \

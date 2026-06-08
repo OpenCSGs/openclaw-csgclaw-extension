@@ -2,22 +2,16 @@
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsghq/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
-TAG ?= 20260607.1-csgclaw
-# Bun runner variant. Keep this tag separate from the stable Node-backed image
-# so users opt in explicitly.
-BUN_TAG ?= 20260605.2-csgclaw-bun
+TAG ?= 20260608.1-csgclaw
 # Optional additional tags for environment aliases or staged promotion.
 # Example: make image EXTRA_TAGS="dev-csgclaw stg-csgclaw"
 EXTRA_TAGS ?=
-BUN_EXTRA_TAGS ?=
 # Tags to move to an already-pushed immutable image tag.
 # Example: make promote-image PROMOTE_TAGS="dev-csgclaw stg-csgclaw"
 PROMOTE_TAGS ?=
 
 IMAGE_TAGS := $(TAG) $(EXTRA_TAGS)
 IMAGE_TAG_ARGS := $(foreach tag,$(IMAGE_TAGS),-t $(REGISTRY)/$(IMAGE_REPO):$(tag))
-BUN_IMAGE_TAGS := $(BUN_TAG) $(BUN_EXTRA_TAGS)
-BUN_IMAGE_TAG_ARGS := $(foreach tag,$(BUN_IMAGE_TAGS),-t $(REGISTRY)/$(IMAGE_REPO):$(tag))
 
 # Path to the sibling csgclaw repo (provides cmd/csgclaw-cli sources).
 CSGCLAW_DIR ?= ../csgclaw
@@ -34,10 +28,10 @@ PNPM ?= pnpm
 OPENCLAW_BASE_VERSION ?= 2026.5.26
 OPENCLAW_UPSTREAM_IMAGE ?= ghcr.io/openclaw/openclaw:$(OPENCLAW_BASE_VERSION)-slim
 OPENCLAW_FEISHU_VERSION ?= $(OPENCLAW_BASE_VERSION)
+CSGCLAW_EXTENSION_VERSION ?= 0.3.9-ext.1
 BASE_IMAGE_REPO ?= opencsghq/openclaw-csgclaw-base
 BASE_TAG ?= $(OPENCLAW_BASE_VERSION)-node24-pnpm10-py3
 OPENCLAW_BASE_IMAGE ?= $(REGISTRY)/$(BASE_IMAGE_REPO):$(BASE_TAG)
-BUN_IMAGE ?= oven/bun:1
 
 .PHONY: prepare-csgclaw-cli
 prepare-csgclaw-cli:
@@ -50,9 +44,7 @@ prepare-csgclaw-cli:
 	$(MAKE) -C $(CSGCLAW_DIR) build-server-bin TARGET_OS=linux TARGET_ARCH=arm64
 	cp $(CSGCLAW_DIR)/bin/csgclaw-cli $(CSGCLAW_CLI_DIR)/csgclaw-cli_linux_arm64
 
-# Build the plugin's dist/ on the host so the Docker build can COPY it
-# directly. dist is arch-independent (transpiled JS), so a single build
-# suffices for all platforms in PLATFORMS.
+# Build the plugin dist/ on the host for local npm publish/dev only.
 .PHONY: prepare-dist
 prepare-dist:
 	$(PNPM) install --frozen-lockfile
@@ -80,54 +72,29 @@ base-image-local:
 	  -f Dockerfile.base .
 
 .PHONY: image
-image: prepare-csgclaw-cli prepare-dist
+image: prepare-csgclaw-cli
 	docker buildx build \
 	  --builder $(BUILDX_BUILDER) \
 	  --platform $(PLATFORMS) \
 	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
 	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
+	  --build-arg CSGCLAW_EXTENSION_VERSION=$(CSGCLAW_EXTENSION_VERSION) \
 	  $(IMAGE_TAG_ARGS) \
 	  --push .
 
 .PHONY: image-local
-image-local: prepare-csgclaw-cli prepare-dist
+image-local: prepare-csgclaw-cli
 	docker buildx build \
 	  --platform $(PLATFORM) \
 	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
 	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
+	  --build-arg CSGCLAW_EXTENSION_VERSION=$(CSGCLAW_EXTENSION_VERSION) \
 	  -t openclaw-csgclaw:local \
 	  --load .
-
-.PHONY: image-bun
-image-bun: prepare-csgclaw-cli prepare-dist
-	docker buildx build \
-	  --builder $(BUILDX_BUILDER) \
-	  --platform $(PLATFORMS) \
-	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
-	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
-	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
-	  $(BUN_IMAGE_TAG_ARGS) \
-	  --push \
-	  -f Dockerfile.bun .
-
-.PHONY: image-bun-local
-image-bun-local: prepare-csgclaw-cli prepare-dist
-	docker buildx build \
-	  --platform $(PLATFORM) \
-	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
-	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
-	  --build-arg BUN_IMAGE=$(BUN_IMAGE) \
-	  -t openclaw-csgclaw-bun:local \
-	  --load \
-	  -f Dockerfile.bun .
 
 .PHONY: image-tags
 image-tags:
 	@printf '%s\n' $(foreach tag,$(IMAGE_TAGS),$(REGISTRY)/$(IMAGE_REPO):$(tag))
-
-.PHONY: image-bun-tags
-image-bun-tags:
-	@printf '%s\n' $(foreach tag,$(BUN_IMAGE_TAGS),$(REGISTRY)/$(IMAGE_REPO):$(tag))
 
 .PHONY: base-image-tags
 base-image-tags:

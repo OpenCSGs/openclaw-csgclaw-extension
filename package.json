@@ -1,6 +1,6 @@
 {
   "name": "csgclaw-extension",
-  "version": "0.1.0",
+  "version": "0.3.9-ext.1",
   "description": "OpenClaw channel plugin: CSGClaw IM bridge (SSE + REST)",
   "type": "module",
   "main": "dist/index.js",
@@ -25,6 +25,9 @@
     "openclaw": {
       "optional": true
     }
+  },
+  "csgclaw": {
+    "serverVersion": "0.3.9"
   },
   "openclaw": {
     "extensions": ["./dist/index.js"],

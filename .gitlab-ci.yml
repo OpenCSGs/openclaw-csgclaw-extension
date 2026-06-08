@@ -12,10 +12,10 @@
 #   DOCKER_PLATFORMS      buildx platforms, e.g. linux/amd64,linux/arm64
 #   EXTRA_TAGS            additional image tags separated by spaces
 #   OPENCLAW_UPSTREAM_IMAGE upstream OpenClaw slim image used for base builds
-#   OPENCLAW_BUILD_IMAGE  Node/pnpm build image for csgclaw-extension dist
 #   OPENCLAW_BASE_IMAGE   pre-baked OpenClaw+CSGClaw runtime base image
 #   OPENCLAW_BASE_TAG     tag for the default pre-baked runtime base image
 #   OPENCLAW_FEISHU_VERSION Feishu plugin npm version (defaults to OPENCLAW_BASE_VERSION)
+#   CSGCLAW_EXTENSION_VERSION csgclaw-extension npm version (defaults to 0.3.9-ext.1)
 #   SKIP_BINFMT_INSTALL   set true when the runner host already has qemu
 #
 # Trigger: push a Git tag. The exact Git tag is used as the Docker image tag,
@@ -31,6 +31,7 @@ variables:
   BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
   DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
   OPENCLAW_BASE_VERSION: "2026.5.26"
+  CSGCLAW_EXTENSION_VERSION: "0.3.9-ext.1"
   OPENCLAW_BASE_REPO: "opencsghq/openclaw-csgclaw-base"
   CSGCLAW_CLI_BASE_URL: "https://csgclaw.opencsg.com/releases/latest"
   CI_DOCKER_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3"
@@ -83,30 +84,17 @@ docker-build-push:
       done
     - export DOCKER_IMAGE="${ACR_REGISTRY}/opencsghq/openclaw"
     - export OPENCLAW_UPSTREAM_IMAGE="${OPENCLAW_UPSTREAM_IMAGE:-ghcr.io/openclaw/openclaw:${OPENCLAW_BASE_VERSION}-slim}"
-    - export OPENCLAW_BUILD_IMAGE="${OPENCLAW_BUILD_IMAGE:-${OPENCLAW_UPSTREAM_IMAGE}}"
     - export OPENCLAW_BASE_TAG="${OPENCLAW_BASE_TAG:-${OPENCLAW_BASE_VERSION}-node24-pnpm10-py3}"
     - export OPENCLAW_BASE_IMAGE="${OPENCLAW_BASE_IMAGE:-${ACR_REGISTRY}/${OPENCLAW_BASE_REPO}:${OPENCLAW_BASE_TAG}}"
     - export OPENCLAW_FEISHU_VERSION="${OPENCLAW_FEISHU_VERSION:-${OPENCLAW_BASE_VERSION}}"
+    - export CSGCLAW_EXTENSION_VERSION="${CSGCLAW_EXTENSION_VERSION:-0.3.9-ext.1}"
     - echo "IMAGE_TAG=${IMAGE_TAG}" && echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
     - echo "OPENCLAW_UPSTREAM_IMAGE=${OPENCLAW_UPSTREAM_IMAGE}"
-    - echo "OPENCLAW_BUILD_IMAGE=${OPENCLAW_BUILD_IMAGE}"
     - echo "OPENCLAW_BASE_IMAGE=${OPENCLAW_BASE_IMAGE}"
     - echo "OPENCLAW_FEISHU_VERSION=${OPENCLAW_FEISHU_VERSION}"
+    - echo "CSGCLAW_EXTENSION_VERSION=${CSGCLAW_EXTENSION_VERSION}"
     - docker info
     - docker buildx version
-    - |
-      set -euo pipefail
-      echo "Building csgclaw-extension dist with ${OPENCLAW_BUILD_IMAGE}"
-      docker run --rm \
-        --user 0:0 \
-        -v "${CI_PROJECT_DIR}:/work" \
-        -w /work \
-        --entrypoint /bin/sh \
-        "${OPENCLAW_BUILD_IMAGE}" \
-        -ec '
-          pnpm install --frozen-lockfile
-          pnpm run build
-        '
     - |
       set -euo pipefail
       mkdir -p docker/csgclaw-cli
@@ -183,6 +171,7 @@ docker-build-push:
         --platform "${DOCKER_PLATFORMS}" \
         --build-arg "OPENCLAW_BASE_IMAGE=${OPENCLAW_BASE_IMAGE}" \
         --build-arg "OPENCLAW_FEISHU_VERSION=${OPENCLAW_FEISHU_VERSION}" \
+        --build-arg "CSGCLAW_EXTENSION_VERSION=${CSGCLAW_EXTENSION_VERSION}" \
         ${tag_args} \
         --provenance=false \
         --sbom=false \
