@@ -1,0 +1,64 @@
+# CI Dockerfile: uses locally-built dist/ and csgclaw-cli instead of npm registry.
+# Identical to Dockerfile except the extension is COPYed from build context.
+#
+# Usage (CI):
+#   pnpm install && pnpm run build          # produces dist/
+#   # csgclaw-cli binaries in docker/csgclaw-cli/
+#   docker build -f Dockerfile.ci -t openclaw-csgclaw:ci .
+
+ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.5.26-node24-pnpm10-py3
+ARG OPENCLAW_FEISHU_VERSION=2026.5.26
+
+FROM scratch AS csgclaw-cli
+ARG TARGETARCH
+COPY docker/csgclaw-cli/csgclaw-cli_linux_${TARGETARCH} /csgclaw-cli
+
+FROM scratch AS extension-dist
+COPY dist/ /extension-dist/
+
+FROM ${OPENCLAW_BASE_IMAGE}
+ARG OPENCLAW_FEISHU_VERSION
+
+USER root
+RUN mkdir -p /home/node/.openclaw/workspace/projects \
+  && mkdir -p /home/node/openclaw-plugins/csgclaw-extension \
+  && mkdir -p /home/node/openclaw-plugins/feishu \
+  && chown -R 1000:1000 /home/node/.openclaw /home/node/openclaw-plugins
+
+ENV HOME=/home/node
+
+# Bake csgclaw-cli
+COPY --from=csgclaw-cli --chmod=0755 /csgclaw-cli /usr/local/bin/csgclaw-cli
+
+# Install extension from local dist (CI path) instead of npm registry
+USER 1000
+COPY --from=extension-dist --chown=1000:1000 /extension-dist /home/node/openclaw-plugins/csgclaw-extension
+RUN cd /home/node/openclaw-plugins/csgclaw-extension \
+  && mkdir -p node_modules \
+  && ln -sfn /app node_modules/openclaw
+
+# Install feishu plugin from npm (unchanged)
+USER 1000
+RUN set -eux; \
+  tmpdir="$(mktemp -d)"; \
+  cd "$tmpdir"; \
+  npm pack --silent "@openclaw/feishu@${OPENCLAW_FEISHU_VERSION}"; \
+  tarball="$(find "$tmpdir" -maxdepth 1 -name '*.tgz' -print -quit)"; \
+  tar -xzf "$tarball" -C /home/node/openclaw-plugins/feishu --strip-components=1; \
+  cd /home/node/openclaw-plugins/feishu; \
+  node -e "const fs=require('node:fs'); const p='package.json'; const pkg=JSON.parse(fs.readFileSync(p,'utf8')); pkg.openclaw = pkg.openclaw || {}; pkg.openclaw.extensions = pkg.openclaw.runtimeExtensions || pkg.openclaw.extensions; pkg.openclaw.setupEntry = pkg.openclaw.runtimeSetupEntry || pkg.openclaw.setupEntry; fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');"; \
+  npm install --omit=dev --ignore-scripts --no-audit --no-fund --legacy-peer-deps --package-lock=false; \
+  ln -sfn /app node_modules/openclaw; \
+  rm -rf "$tmpdir"
+
+USER root
+# Root-owned baked plugins are accepted by OpenClaw discovery for any runtime uid
+RUN chown -R root:root /home/node/openclaw-plugins
+
+USER 1000
+WORKDIR /app
+
+HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "openclaw.mjs", "gateway", "--allow-unconfigured", "--bind", "lan", "--port", "18789"]

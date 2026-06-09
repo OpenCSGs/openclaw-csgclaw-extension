@@ -60,7 +60,7 @@ base-image:
 	  --build-arg OPENCLAW_UPSTREAM_IMAGE=$(OPENCLAW_UPSTREAM_IMAGE) \
 	  -t $(OPENCLAW_BASE_IMAGE) \
 	  --push \
-	  -f Dockerfile.base .
+	  -f docker/Dockerfile.base .
 
 .PHONY: base-image-local
 base-image-local:
@@ -69,7 +69,7 @@ base-image-local:
 	  --build-arg OPENCLAW_UPSTREAM_IMAGE=$(OPENCLAW_UPSTREAM_IMAGE) \
 	  -t openclaw-csgclaw-base:local \
 	  --load \
-	  -f Dockerfile.base .
+	  -f docker/Dockerfile.base .
 
 .PHONY: image
 image: prepare-csgclaw-cli
@@ -80,7 +80,8 @@ image: prepare-csgclaw-cli
 	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
 	  --build-arg CSGCLAW_EXTENSION_VERSION=$(CSGCLAW_EXTENSION_VERSION) \
 	  $(IMAGE_TAG_ARGS) \
-	  --push .
+	  --push \
+	  -f docker/Dockerfile .
 
 .PHONY: image-local
 image-local: prepare-csgclaw-cli
@@ -90,7 +91,8 @@ image-local: prepare-csgclaw-cli
 	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
 	  --build-arg CSGCLAW_EXTENSION_VERSION=$(CSGCLAW_EXTENSION_VERSION) \
 	  -t openclaw-csgclaw:local \
-	  --load .
+	  --load \
+	  -f docker/Dockerfile .
 
 .PHONY: image-tags
 image-tags:
