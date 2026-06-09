@@ -27,8 +27,41 @@ variables:
   BUILDKIT_CI_IMAGE: "${ACR_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
 
 stages:
+  - prepare
   - build
 
+# Stage 1: Build extension dist + csgclaw-cli binaries using node image
+build-artifacts:
+  stage: prepare
+  image: node:24-alpine
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    - apk add --no-cache git make bash
+    - corepack enable
+    - pnpm --version
+  script:
+    # Build extension dist
+    - pnpm install --frozen-lockfile
+    - pnpm run build
+    - echo "dist/ ready:" && ls -la dist/
+    # Build csgclaw-cli for both architectures
+    - git clone --depth 1 https://github.com/OpenCSGs/csgclaw.git /tmp/csgclaw-src
+    - cd /tmp/csgclaw-src
+    - apk add --no-cache go musl-dev
+    - make build-server-bin TARGET_OS=linux TARGET_ARCH=amd64
+    - make build-server-bin TARGET_OS=linux TARGET_ARCH=arm64
+    - mkdir -p "${CI_PROJECT_DIR}/docker/csgclaw-cli"
+    - cp bin/csgclaw-cli "${CI_PROJECT_DIR}/docker/csgclaw-cli/csgclaw-cli_linux_amd64"
+    - cp bin/csgclaw-cli "${CI_PROJECT_DIR}/docker/csgclaw-cli/csgclaw-cli_linux_arm64"
+    - echo "csgclaw-cli binaries ready:" && ls -la "${CI_PROJECT_DIR}/docker/csgclaw-cli/"
+  artifacts:
+    paths:
+      - dist/
+      - docker/csgclaw-cli/
+    expire_in: 1 hour
+
+# Stage 2: Build and push multi-arch Docker image
 docker-build-push:
   stage: build
   image:
@@ -40,6 +73,8 @@ docker-build-push:
       alias: docker
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
+  needs:
+    - build-artifacts
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
@@ -47,13 +82,12 @@ docker-build-push:
     - export TZ=Asia/Shanghai
     - echo "$ACR_PASSWORD" | docker login -u "$ACR_USERNAME" --password-stdin "$ACR_REGISTRY"
     # Auto-generate tag: YYYYMMDD.{CI_PIPELINE_IID}-csgclaw
-    # CI_PIPELINE_IID is per-project monotonic, so same-day builds get unique suffixes
     - export IMAGE_TAG="$(date +%Y%m%d).${CI_PIPELINE_IID}-csgclaw"
     - export DOCKER_IMAGE="${ACR_REGISTRY}/${IMAGE_REPO}"
     - echo "IMAGE_TAG=${IMAGE_TAG}" && echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
     - docker info
     - docker buildx version
-    # Install binfmt for cross-arch emulation (skip if runner host already supports it)
+    # Install binfmt for cross-arch emulation
     - |
       set -eu
       if [ "${SKIP_BINFMT_INSTALL:-}" = "true" ] || [ "${SKIP_BINFMT_INSTALL:-}" = "1" ]; then
@@ -74,28 +108,9 @@ docker-build-push:
       docker buildx imagetools inspect "${BASE_IMG}" | tee /tmp/base-manifest.txt
       grep -Eq 'Platform:[[:space:]]+linux/amd64' /tmp/base-manifest.txt
       grep -Eq 'Platform:[[:space:]]+linux/arm64' /tmp/base-manifest.txt
-    # Build extension dist locally (replaces npm pack in Dockerfile.ci)
-    - |
-      set -euo pipefail
-      echo "Building extension dist..."
-      pnpm install --frozen-lockfile
-      pnpm run build
-      echo "dist/ ready:"
-      ls -la dist/
-    # Build csgclaw-cli binaries for both architectures (needed by Dockerfile.ci)
-    - |
-      set -euo pipefail
-      echo "Cloning csgclaw repo for CLI build..."
-      git clone --depth 1 https://github.com/OpenCSGs/csgclaw.git /tmp/csgclaw-src
-      cd /tmp/csgclaw-src
-      make build-server-bin TARGET_OS=linux TARGET_ARCH=amd64
-      make build-server-bin TARGET_OS=linux TARGET_ARCH=arm64
-      mkdir -p "${CI_PROJECT_DIR}/docker/csgclaw-cli"
-      cp bin/csgclaw-cli "${CI_PROJECT_DIR}/docker/csgclaw-cli/csgclaw-cli_linux_amd64"
-      cp bin/csgclaw-cli "${CI_PROJECT_DIR}/docker/csgclaw-cli/csgclaw-cli_linux_arm64"
-      echo "csgclaw-cli binaries ready:"
-      ls -la "${CI_PROJECT_DIR}/docker/csgclaw-cli/"
     - cd "${CI_PROJECT_DIR}"
+    - echo "Artifacts from build-artifacts:"
+    - ls -la dist/ docker/csgclaw-cli/
   script:
     - |
       set -euo pipefail
