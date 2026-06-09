@@ -52,10 +52,12 @@ An [OpenClaw](https://github.com/openclaw/openclaw) channel plugin that bridges 
 │   ├── config.ts         # Account resolution, API URL builders
 │   ├── monitor.ts        # SSE event consumer + inbound dispatch + outbound send
 │   └── sse.ts            # Minimal SSE stream reader over fetch()
-├── Dockerfile            # Multi-stage: base image + plugins + csgclaw-cli
-├── Dockerfile.base       # OpenClaw slim → ACR base (Python + CA certs)
-├── Makefile              # Build targets for local dev and CI image publishing
-└── .gitlab-ci.yml        # GitLab CI: multi-arch buildx → ACR (tag-triggered)
+── docker/                 # Docker files (see docker/README.md)
+│   ├── Dockerfile          # Production image (pulls from npm)
+│   ├── Dockerfile.base     # Base image (OpenClaw runtime)
+│   └── Dockerfile.ci       # CI-only image (uses local dist)
+├── .gitlab/ci.yml          # GitLab CI: main branch → multi-arch buildx → ACR
+└── Makefile                # Build targets for local dev and CI image publishing
 ```
 
 ## Quick Start
@@ -196,7 +198,7 @@ The project uses a **dual-CI** setup:
 | Platform | Trigger | Purpose |
 |---|---|---|
 | GitHub Actions | Pull requests | TypeScript build check |
-| GitLab CI | Git tags | Multi-arch Docker build → push to ACR |
+| GitLab CI | `main` branch push | Multi-arch Docker build → push to ACR |
 
 ### Repository Sync
 
@@ -208,11 +210,28 @@ GitHub (source of truth)
        ▼
 GitLab (CI runner)
        │
-       │  .gitlab-ci.yml (tag-triggered)
+       │  .gitlab/ci.yml (main branch triggered)
        ▼
 ACR (Alibaba Cloud Container Registry)
-  opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw:<tag>
+  opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw:YYYYMMDD.N-csgclaw
 ```
+
+### Triggering CI Builds
+
+GitLab CI automatically triggers when the `main` branch is updated via mirror sync. The default sync interval is **30 minutes**.
+
+**To manually trigger an immediate sync and CI build:**
+
+1. Go to GitLab **Settings → Repository → Mirroring repositories**
+2. Find the mirror entry for this repository
+3. Click the **refresh button** (🔄) next to the mirror entry
+4. Wait a few seconds, then check **CI/CD → Pipelines** for the build status
+
+Direct link: https://git-devops.opencsg.com/product/agentichub/openclaw-csgclaw-extension/-/settings/repository#js-push-remote-settings
+
+**Image tag format:** `YYYYMMDD.{CI_PIPELINE_IID}-csgclaw`
+- `CI_PIPELINE_IID` is a GitLab project-level monotonic ID
+- Multiple pushes on the same day get unique tags: `20260609.1-csgclaw`, `20260609.2-csgclaw`, etc.
 
 ## Development
 
@@ -240,10 +259,10 @@ make image-local
 ### Version Bump
 
 1. Update `version` in `package.json`
-2. Update `CSGCLAW_EXTENSION_VERSION` in `Makefile` and `.gitlab-ci.yml`
+2. Update `CSGCLAW_EXTENSION_VERSION` in `Makefile` and `docker/Dockerfile`
 3. Update `OPENCLAW_BASE_VERSION` if the upstream OpenClaw version changed
-4. Commit and tag: `git tag v<version>`
-5. Push tag to trigger the GitLab CI build
+4. Commit and push to `main`
+5. GitLab mirror sync triggers CI build automatically (or manually trigger sync)
 
 ## Related Projects
 
