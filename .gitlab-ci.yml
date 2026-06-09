@@ -154,7 +154,7 @@ docker-build-push:
           --provenance=false \
           --sbom=false \
           --push \
-          -f Dockerfile.base \
+          -f docker/Dockerfile.base \
           .
         docker buildx imagetools inspect "${OPENCLAW_BASE_IMAGE}" > /tmp/openclaw-base-manifest.txt
       fi
