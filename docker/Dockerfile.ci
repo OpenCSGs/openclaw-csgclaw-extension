@@ -14,7 +14,9 @@ ARG TARGETARCH
 COPY docker/csgclaw-cli/csgclaw-cli_linux_${TARGETARCH} /csgclaw-cli
 
 FROM scratch AS extension-dist
-COPY dist/ /extension-dist/
+COPY dist/ /extension-dist/dist/
+COPY openclaw.plugin.json /extension-dist/openclaw.plugin.json
+COPY package.json /extension-dist/package.json
 
 FROM ${OPENCLAW_BASE_IMAGE}
 ARG OPENCLAW_FEISHU_VERSION

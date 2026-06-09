@@ -139,6 +139,7 @@ docker-build-push:
         expected_arch="${entry##*:}"
         echo "Validating ${DOCKER_IMAGE}:${IMAGE_TAG} on ${platform}"
         docker run --rm --platform "${platform}" --entrypoint /bin/sh "${DOCKER_IMAGE}:${IMAGE_TAG}" -ec "
+          set -x
           test \"\$(uname -m)\" = \"${expected_arch}\"
           tini --version >/dev/null
           python --version >/dev/null
@@ -147,6 +148,7 @@ docker-build-push:
           /usr/local/bin/csgclaw-cli --help >/dev/null 2>&1
           test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js
           test -f /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
+          test -f /home/node/openclaw-plugins/csgclaw-extension/package.json
           test -L /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw
           test \"\$(readlink /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw)\" = \"/app\"
           test -f /home/node/openclaw-plugins/feishu/dist/index.js
