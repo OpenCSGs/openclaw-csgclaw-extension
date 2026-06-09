@@ -1,4 +1,4 @@
-# CSGClaw Extension
+# openclaw-csgclaw-extension
 
 [![PR](https://github.com/OpenCSGs/openclaw-csgclaw-extension/actions/workflows/pr.yml/badge.svg)](https://github.com/OpenCSGs/openclaw-csgclaw-extension/actions/workflows/pr.yml)
 
