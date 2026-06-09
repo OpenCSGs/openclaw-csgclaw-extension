@@ -46,7 +46,7 @@ build-artifacts:
     - pnpm run build
     - echo "dist/ ready:" && ls -la dist/
     # Build csgclaw-cli for both architectures
-    - git clone --depth 1 https://github.com/OpenCSGs/csgclaw.git /tmp/csgclaw-src
+    - git clone --depth 1 https://ghfast.top/https://github.com/OpenCSGs/csgclaw.git /tmp/csgclaw-src
     - cd /tmp/csgclaw-src
     - make build-server-bin TARGET_OS=linux TARGET_ARCH=amd64
     - make build-server-bin TARGET_OS=linux TARGET_ARCH=arm64
