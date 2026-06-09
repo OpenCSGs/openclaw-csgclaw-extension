@@ -15,21 +15,28 @@ USER root
 # full standard library (urllib, subprocess, ssl, ...). `python3-minimal` alone is too
 # stripped for these scripts. Non-Debian bases (e.g. Alpine apk python3) would differ.
 #
-# Go and musl-dev for CI: csgclaw-cli cross-compilation needs static linking.
+# musl-dev for CI: csgclaw-cli cross-compilation needs static linking.
 # Installing here avoids apt-get permission issues in CI (container runs as USER 1000).
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     python3 \
     ca-certificates \
-    golang \
     musl-dev \
     git \
     make \
     bash \
+    curl \
   && rm -rf /var/lib/apt/lists/* \
-  && ln -sf /usr/bin/python3 /usr/local/bin/python \
-  && mkdir -p /usr/local/share/corepack \
-  && chown -R 1000:1000 /usr/local/share/corepack
+  && ln -sf /usr/bin/python3 /usr/local/bin/python
+
+# Install Go 1.26.2 (Debian bookworm's golang 1.19 is too old for csgclaw)
+ARG TARGETARCH
+RUN curl -fsSL "https://go.dev/dl/go1.26.2.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xzf - \
+  && ln -sf /usr/local/go/bin/go /usr/local/bin/go \
+  && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+
+# Fix corepack cache directory ownership (pnpm needs write access)
+RUN chown -R 1000:1000 /usr/local/share/corepack
 
 USER 1000
 ENV HOME=/home/node
