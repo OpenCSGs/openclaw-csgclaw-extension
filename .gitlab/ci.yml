@@ -140,10 +140,49 @@ docker-build-push:
         echo "Validating ${DOCKER_IMAGE}:${IMAGE_TAG} on ${platform}"
         docker run --rm --platform "${platform}" --entrypoint /bin/sh "${DOCKER_IMAGE}:${IMAGE_TAG}" -ec "
           test \"\$(uname -m)\" = \"${expected_arch}\"
-          /sbin/tini --version >/dev/null
-          /usr/local/bin/csgclaw-cli --help >/dev/null
+          tini --version >/dev/null
+          python --version >/dev/null
+          node --version >/dev/null
+          node /app/openclaw.mjs --version >/dev/null
+          /usr/local/bin/csgclaw-cli --help >/dev/null 2>&1
           test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js
           test -f /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
+          test -L /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw
+          test \"\$(readlink /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw)\" = \"/app\"
+          test -f /home/node/openclaw-plugins/feishu/dist/index.js
+          test -f /home/node/openclaw-plugins/feishu/dist/setup-entry.js
+          test -f /home/node/openclaw-plugins/feishu/openclaw.plugin.json
+          test -L /home/node/openclaw-plugins/feishu/node_modules/openclaw
+          test \"\$(readlink /home/node/openclaw-plugins/feishu/node_modules/openclaw)\" = \"/app\"
+          node --input-type=module -e '
+            import fs from \"node:fs\";
+            const pkg = JSON.parse(fs.readFileSync(\"/home/node/openclaw-plugins/feishu/package.json\", \"utf8\"));
+            if (pkg.openclaw?.extensions?.[0] !== \"./dist/index.js\") throw new Error(\"bad feishu extension entry\");
+            if (pkg.openclaw?.setupEntry !== \"./dist/setup-entry.js\") throw new Error(\"bad feishu setup entry\");
+            await import(\"file:///home/node/openclaw-plugins/feishu/dist/index.js\");
+          '
+          node --input-type=module -e '
+            const { loadOpenClawPlugins } = await import(\"/app/dist/plugins/loader.js\");
+            const config = {
+              channels: {
+                csgclaw: { enabled: true, baseUrl: \"http://127.0.0.1:18080\", botId: \"ci\" },
+                feishu: {
+                  enabled: true,
+                  defaultAccount: \"ci\",
+                  accounts: { ci: { enabled: true, appId: \"cli_a_ci\", appSecret: \"ci-secret\" } }
+                }
+              },
+              plugins: {
+                load: { paths: [\"/home/node/openclaw-plugins\"] },
+                entries: { csgclaw: { enabled: true }, feishu: { enabled: true } }
+              }
+            };
+            const registry = loadOpenClawPlugins({ config, cache: false, throwOnLoadError: false, env: process.env });
+            for (const id of [\"csgclaw\", \"feishu\"]) {
+              const plugin = registry.plugins.find((entry) => entry.id === id);
+              if (!plugin || plugin.status !== \"loaded\") throw new Error(id + \" not loaded: \" + (plugin?.error ?? \"missing\"));
+            }
+          '
         "
       done
   after_script:
