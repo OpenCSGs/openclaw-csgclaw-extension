@@ -68,6 +68,30 @@ make base-image           # rebuild base (rare)
 
 ---
 
+## Agent Skills
+
+Local skills live under `.codex/skills/`. Read and follow the matching `SKILL.md` before running the workflow.
+
+| Skill | When to use |
+|-------|-------------|
+| `conventional-commit` | Generate Conventional Commit messages from git diff; **required before any commit** |
+| `gh-pr-review-comment` | Review a GitHub PR diff and draft or publish review comments |
+
+### Commit rules
+
+- Before creating a commit, use `.codex/skills/conventional-commit/SKILL.md`.
+- Never add `Co-authored-by`, `Signed-off-by`, or any Cursor/Codex/Claude/agent attribution to commit messages.
+- Commit as the repository user only; do not override git author/committer unless explicitly requested.
+
+Example:
+
+```bash
+python3 .codex/skills/conventional-commit/scripts/collect_git_changes.py --repo .
+python3 .codex/skills/conventional-commit/scripts/apply_commit.py --repo . --message "fix(ci): consolidate pipeline"
+```
+
+---
+
 ## References
 
 - [Docker files docs](./docker/README.md)
