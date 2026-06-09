@@ -30,15 +30,16 @@ stages:
   - prepare
   - build
 
-# Stage 1: Build extension dist + csgclaw-cli binaries using node image
+# Stage 1: Build extension dist + csgclaw-cli binaries using base image
 build-artifacts:
   stage: prepare
-  image: node:24-alpine
+  image:
+    name: ${ACR_REGISTRY}/${BASE_IMAGE_REPO}:${BASE_TAG}
+    entrypoint: [""]
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   before_script:
-    - apk add --no-cache git make bash
-    - corepack enable
+    - apt-get update && apt-get install -y --no-install-recommends git make bash golang musl-dev
     - pnpm --version
   script:
     # Build extension dist
