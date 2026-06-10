@@ -1,6 +1,7 @@
 import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { ChannelGatewayContext } from "openclaw/plugin-sdk";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import type { ResolvedCsgclawAccount } from "./config.js";
@@ -50,6 +51,9 @@ type CsgclawFeishuSsePayload = {
 };
 
 type ChannelRuntimeCore = PluginRuntime["channel"];
+type ChannelLog = NonNullable<ChannelGatewayContext<ResolvedCsgclawAccount>["log"]>;
+
+const maxFailureReplyDetailLength = 1200;
 
 function readBoolean(v: unknown): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
@@ -82,6 +86,43 @@ function parseTimestampMs(v: unknown): number | undefined {
   }
   const parsed = Date.parse(trimmed);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function formatFailureReplyDetail(err: unknown): string {
+  const message = formatErrorMessage(err).trim() || "unknown error";
+  if (message.length <= maxFailureReplyDetailLength) {
+    return message;
+  }
+  return `${message.slice(0, maxFailureReplyDetailLength)}...`;
+}
+
+function formatRuntimeFailureReply(err: unknown): string {
+  return `OpenClaw runtime failed before reply: ${formatFailureReplyDetail(err)}`;
+}
+
+async function dispatchReplyWithVisibleFailure(params: {
+  label: string;
+  abortSignal: AbortSignal;
+  log?: ChannelLog;
+  dispatch: () => Promise<void>;
+  deliverFailure: (text: string) => Promise<void>;
+}): Promise<void> {
+  try {
+    await params.dispatch();
+  } catch (err) {
+    if (params.abortSignal.aborted) {
+      throw err;
+    }
+    const failureReply = formatRuntimeFailureReply(err);
+    params.log?.warn?.(`${params.label}: reply dispatch failed: ${formatFailureReplyDetail(err)}`);
+    try {
+      await params.deliverFailure(failureReply);
+    } catch (sendErr) {
+      params.log?.error?.(
+        `${params.label}: failed to send visible reply failure: ${formatErrorMessage(sendErr)}`,
+      );
+    }
+  }
 }
 
 export function isCsgclawFeishuBridgeConfigured(cfg: OpenClawConfig, participantId: string): boolean {
@@ -535,20 +576,30 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             accountId: ctx.accountId,
           });
 
-          await core.reply.dispatchReplyWithBufferedBlockDispatcher({
-            ctx: ctxPayload,
-            cfg,
-            dispatcherOptions: {
-              ...replyPipeline,
-              deliver: async (payload: ReplyPayload) => {
-                const out = (payload.text ?? "").trim();
-                if (!out) {
-                  return;
-                }
-                await postSend(account, chatId, out);
-              },
+          await dispatchReplyWithVisibleFailure({
+            label: "csgclaw",
+            abortSignal: ctx.abortSignal,
+            log: ctx.log,
+            dispatch: async () => {
+              await core.reply.dispatchReplyWithBufferedBlockDispatcher({
+                ctx: ctxPayload,
+                cfg,
+                dispatcherOptions: {
+                  ...replyPipeline,
+                  deliver: async (payload: ReplyPayload) => {
+                    const out = (payload.text ?? "").trim();
+                    if (!out) {
+                      return;
+                    }
+                    await postSend(account, chatId, out);
+                  },
+                },
+                replyOptions: { onModelSelected },
+              });
             },
-            replyOptions: { onModelSelected },
+            deliverFailure: async (text) => {
+              await postSend(account, chatId, text);
+            },
           });
         },
       });
@@ -684,20 +735,30 @@ export async function monitorCsgclawFeishuProvider(
             accountId: feishuAccountId,
           });
 
-          await core.reply.dispatchReplyWithBufferedBlockDispatcher({
-            ctx: ctxPayload,
-            cfg,
-            dispatcherOptions: {
-              ...replyPipeline,
-              deliver: async (reply: ReplyPayload) => {
-                const out = (reply.text ?? "").trim();
-                if (!out) {
-                  return;
-                }
-                await postFeishuSend(account, cfg, roomId, out, replyMentionBotId);
-              },
+          await dispatchReplyWithVisibleFailure({
+            label: "csgclaw-feishu",
+            abortSignal: ctx.abortSignal,
+            log: ctx.log,
+            dispatch: async () => {
+              await core.reply.dispatchReplyWithBufferedBlockDispatcher({
+                ctx: ctxPayload,
+                cfg,
+                dispatcherOptions: {
+                  ...replyPipeline,
+                  deliver: async (reply: ReplyPayload) => {
+                    const out = (reply.text ?? "").trim();
+                    if (!out) {
+                      return;
+                    }
+                    await postFeishuSend(account, cfg, roomId, out, replyMentionBotId);
+                  },
+                },
+                replyOptions: { onModelSelected },
+              });
             },
-            replyOptions: { onModelSelected },
+            deliverFailure: async (text) => {
+              await postFeishuSend(account, cfg, roomId, text, replyMentionBotId);
+            },
           });
         },
       });
