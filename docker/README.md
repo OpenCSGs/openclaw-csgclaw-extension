@@ -62,10 +62,7 @@ docker/
 ├── README.md              # 本说明文件
 ── Dockerfile             # 生产镜像（npm 拉取）
 ├── Dockerfile.base        # 基础镜像
-├── Dockerfile.ci          # CI 专用镜像（本地 dist）
-└── csgclaw-cli/           # csgclaw-cli 二进制文件目录
-    ├── csgclaw-cli_linux_amd64
-    └── csgclaw-cli_linux_arm64
+└── Dockerfile.ci          # CI 专用镜像（本地 dist）
 ```
 
 ## 镜像标签格式

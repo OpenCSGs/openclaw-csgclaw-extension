@@ -78,9 +78,6 @@ pnpm run build
 ### Build Docker Image (Local)
 
 ```bash
-# Build csgclaw-cli from sibling repo
-make prepare-csgclaw-cli CSGCLAW_DIR=../csgclaw
-
 # Build and load into local Docker
 make image-local
 ```
@@ -202,7 +199,6 @@ See [docker/README.md](./docker/README.md) for details.
 ### CI Build Fails
 
 - **pnpm not found**: CI uses base image with pnpm pre-installed. Check if base image is accessible.
-- **csgclaw-cli not found**: CI clones `csgclaw` repo automatically. Verify GitHub access from GitLab runner.
 - **Base image platform mismatch**: Ensure base image has both `linux/amd64` and `linux/arm64` manifests.
 
 ### Local Build Issues

@@ -51,7 +51,7 @@ const pluginBase = createChannelPluginBase<ResolvedCsgclawAccount>({
   },
 });
 
-/** Room targets from CSGClaw IM: explicit bridge form or bare id from csgclaw-cli room list. */
+/** Room targets from CSGClaw IM: explicit bridge form or bare room id. */
 function isCsgclawRoomTarget(raw: string): boolean {
   const t = raw.trim();
   return /^csgclaw:room:/i.test(t) || /^room-[-\w]+$/i.test(t);
@@ -66,7 +66,7 @@ export const csgclawPlugin: ChannelPlugin<ResolvedCsgclawAccount> = createChatCh
       inferTargetChatType: ({ to }) => (isCsgclawRoomTarget(to) ? "group" : undefined),
       targetResolver: {
         looksLikeId: (raw) => isCsgclawRoomTarget(raw),
-        hint: "Use csgclaw:room:<room_id> or a bare room id from csgclaw-cli room list (e.g. room-...).",
+        hint: "Use csgclaw:room:<room_id> or a bare room id (e.g. room-...).",
         async resolveTarget({ input }) {
           const t = input.trim();
           if (/^csgclaw:room:/i.test(t)) {

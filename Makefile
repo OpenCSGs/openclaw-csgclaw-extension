@@ -13,9 +13,6 @@ PROMOTE_TAGS ?=
 IMAGE_TAGS := $(TAG) $(EXTRA_TAGS)
 IMAGE_TAG_ARGS := $(foreach tag,$(IMAGE_TAGS),-t $(REGISTRY)/$(IMAGE_REPO):$(tag))
 
-# Path to the sibling csgclaw repo (provides cmd/csgclaw-cli sources).
-CSGCLAW_DIR ?= ../csgclaw
-
 # Default platform list when invoking `make image` (multi-arch publish).
 PLATFORMS ?= linux/amd64,linux/arm64
 
@@ -23,7 +20,6 @@ PLATFORMS ?= linux/amd64,linux/arm64
 # a single platform. Override with PLATFORM=linux/amd64 if you cross-build.
 PLATFORM ?= $(shell uname -m | sed -e 's/arm64/linux\/arm64/' -e 's/aarch64/linux\/arm64/' -e 's/x86_64/linux\/amd64/' -e 's/amd64/linux\/amd64/')
 
-CSGCLAW_CLI_DIR := docker/csgclaw-cli
 PNPM ?= pnpm
 OPENCLAW_BASE_VERSION ?= 2026.5.26
 OPENCLAW_UPSTREAM_IMAGE ?= ghcr.io/openclaw/openclaw:$(OPENCLAW_BASE_VERSION)-slim
@@ -32,17 +28,6 @@ CSGCLAW_EXTENSION_VERSION ?= 0.3.9-ext.2
 BASE_IMAGE_REPO ?= opencsghq/openclaw-csgclaw-base
 BASE_TAG ?= $(OPENCLAW_BASE_VERSION)-node24-pnpm10-py3
 OPENCLAW_BASE_IMAGE ?= $(REGISTRY)/$(BASE_IMAGE_REPO):$(BASE_TAG)
-
-.PHONY: prepare-csgclaw-cli
-prepare-csgclaw-cli:
-	@mkdir -p $(CSGCLAW_CLI_DIR)
-	@if [ ! -d "$(CSGCLAW_DIR)" ]; then \
-	  echo "csgclaw repo not found at $(CSGCLAW_DIR); set CSGCLAW_DIR=/abs/path"; exit 1; \
-	fi
-	$(MAKE) -C $(CSGCLAW_DIR) build-server-bin TARGET_OS=linux TARGET_ARCH=amd64
-	cp $(CSGCLAW_DIR)/bin/csgclaw-cli $(CSGCLAW_CLI_DIR)/csgclaw-cli_linux_amd64
-	$(MAKE) -C $(CSGCLAW_DIR) build-server-bin TARGET_OS=linux TARGET_ARCH=arm64
-	cp $(CSGCLAW_DIR)/bin/csgclaw-cli $(CSGCLAW_CLI_DIR)/csgclaw-cli_linux_arm64
 
 # Build the plugin dist/ on the host for local npm publish/dev only.
 .PHONY: prepare-dist
@@ -72,7 +57,7 @@ base-image-local:
 	  -f docker/Dockerfile.base .
 
 .PHONY: image
-image: prepare-csgclaw-cli
+image:
 	docker buildx build \
 	  --builder $(BUILDX_BUILDER) \
 	  --platform $(PLATFORMS) \
@@ -84,7 +69,7 @@ image: prepare-csgclaw-cli
 	  -f docker/Dockerfile .
 
 .PHONY: image-local
-image-local: prepare-csgclaw-cli
+image-local:
 	docker buildx build \
 	  --platform $(PLATFORM) \
 	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
