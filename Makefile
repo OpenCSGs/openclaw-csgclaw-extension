@@ -2,7 +2,7 @@
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsghq/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
-TAG ?= 20260608.2-csgclaw
+TAG ?= 20260623.1-csgclaw
 # Optional additional tags for environment aliases or staged promotion.
 # Example: make image EXTRA_TAGS="dev-csgclaw stg-csgclaw"
 EXTRA_TAGS ?=

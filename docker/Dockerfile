@@ -23,6 +23,9 @@ RUN mkdir -p /home/node/.openclaw/workspace/projects \
 
 ENV HOME=/home/node
 
+# Avoid Feishu's OpenClaw ping probe; it blocks manager bot group invites.
+COPY --chown=1000:1000 docker/patch-openclaw-feishu-probe.mjs /tmp/patch-openclaw-feishu-probe.mjs
+
 USER 1000
 RUN set -eux; \
   tmpdir="$(mktemp -d)"; \
@@ -40,6 +43,7 @@ RUN set -eux; \
   tar -xzf "$tarball" -C /home/node/openclaw-plugins/feishu --strip-components=1; \
   cd /home/node/openclaw-plugins/feishu; \
   node -e "const fs=require('node:fs'); const p='package.json'; const pkg=JSON.parse(fs.readFileSync(p,'utf8')); pkg.openclaw = pkg.openclaw || {}; pkg.openclaw.extensions = pkg.openclaw.runtimeExtensions || pkg.openclaw.extensions; pkg.openclaw.setupEntry = pkg.openclaw.runtimeSetupEntry || pkg.openclaw.setupEntry; fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');"; \
+  node /tmp/patch-openclaw-feishu-probe.mjs /home/node/openclaw-plugins/feishu; \
   npm install --omit=dev --ignore-scripts --no-audit --no-fund --legacy-peer-deps --package-lock=false; \
   ln -sfn /app node_modules/openclaw; \
   rm -rf "$tmpdir"

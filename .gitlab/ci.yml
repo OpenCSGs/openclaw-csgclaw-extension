@@ -128,6 +128,8 @@ docker-build-push:
           test -f /home/node/openclaw-plugins/feishu/openclaw.plugin.json
           test -L /home/node/openclaw-plugins/feishu/node_modules/openclaw
           test \"\$(readlink /home/node/openclaw-plugins/feishu/node_modules/openclaw)\" = \"/app\"
+          ! grep -R \"/open-apis/bot/v1/openclaw_bot/ping\" /home/node/openclaw-plugins/feishu/dist
+          grep -R \"/open-apis/bot/v3/info\" /home/node/openclaw-plugins/feishu/dist
           node --input-type=module -e '
             import fs from \"node:fs\";
             const pkg = JSON.parse(fs.readFileSync(\"/home/node/openclaw-plugins/feishu/package.json\", \"utf8\"));
