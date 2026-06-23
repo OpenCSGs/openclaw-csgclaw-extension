@@ -1,17 +1,12 @@
-# CI Dockerfile: uses locally-built dist/ and csgclaw-cli instead of npm registry.
+# CI Dockerfile: uses locally-built dist/ instead of npm registry.
 # Identical to Dockerfile except the extension is COPYed from build context.
 #
 # Usage (CI):
 #   pnpm install && pnpm run build          # produces dist/
-#   # csgclaw-cli binaries in docker/csgclaw-cli/
 #   docker build -f Dockerfile.ci -t openclaw-csgclaw:ci .
 
 ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.5.26-node24-pnpm10-py3
 ARG OPENCLAW_FEISHU_VERSION=2026.5.26
-
-FROM scratch AS csgclaw-cli
-ARG TARGETARCH
-COPY docker/csgclaw-cli/csgclaw-cli_linux_${TARGETARCH} /csgclaw-cli
 
 FROM scratch AS extension-dist
 COPY dist/ /extension-dist/dist/
@@ -28,9 +23,6 @@ RUN mkdir -p /home/node/.openclaw/workspace/projects \
   && chown -R 1000:1000 /home/node/.openclaw /home/node/openclaw-plugins
 
 ENV HOME=/home/node
-
-# Bake csgclaw-cli
-COPY --from=csgclaw-cli --chmod=0755 /csgclaw-cli /usr/local/bin/csgclaw-cli
 
 # Install extension from local dist (CI path) instead of npm registry
 USER 1000

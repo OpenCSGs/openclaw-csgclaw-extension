@@ -39,7 +39,7 @@ An [OpenClaw](https://github.com/openclaw/openclaw) channel plugin that bridges 
 - **Feishu bridge** — optional Feishu channel pass-through via the same participant API
 - **Group mention filtering** — only dispatches group messages when the bot is @-mentioned (configurable per room)
 - **Topic/thread support** — preserves topic context for threaded conversations
-- **Multi-arch Docker image** — pre-baked image with `csgclaw-cli` + plugins for `linux/amd64` and `linux/arm64`
+- **Multi-arch Docker image** — pre-baked image with the channel plugins for `linux/amd64` and `linux/arm64`
 
 ## Project Structure
 
@@ -153,14 +153,11 @@ When both CSGClaw and Feishu channels are configured, the plugin can forward inb
 
 ## Docker Image
 
-The Dockerfile produces a ready-to-run OpenClaw gateway image with `csgclaw-cli`, the CSGClaw extension, and the Feishu plugin pre-installed.
+The Dockerfile produces a ready-to-run OpenClaw gateway image with the CSGClaw extension and Feishu plugin pre-installed.
 
 ### Build Locally (single platform)
 
 ```bash
-# Build csgclaw-cli binaries from the sibling csgclaw repo
-make prepare-csgclaw-cli CSGCLAW_DIR=../csgclaw
-
 # Build and load into local Docker daemon
 make image-local
 ```
@@ -179,7 +176,6 @@ make image TAG=20260609.1-csgclaw PLATFORMS=linux/amd64,linux/arm64
 | Component | Location in Image |
 |---|---|
 | OpenClaw runtime | `/app` |
-| csgclaw-cli | `/usr/local/bin/csgclaw-cli` |
 | CSGClaw plugin | `/home/node/openclaw-plugins/csgclaw-extension/` |
 | Feishu plugin | `/home/node/openclaw-plugins/feishu/` |
 
@@ -242,17 +238,14 @@ pnpm install --frozen-lockfile
 pnpm run build    # → dist/
 ```
 
-### Build Everything (Plugin + CLI + Image)
+### Build Everything (Plugin + Image)
 
 ```bash
 # 1. Build plugin
 pnpm install --frozen-lockfile
 pnpm run build
 
-# 2. Build csgclaw-cli from sibling repo
-make prepare-csgclaw-cli CSGCLAW_DIR=../csgclaw
-
-# 3. Build local image
+# 2. Build local image
 make image-local
 ```
 

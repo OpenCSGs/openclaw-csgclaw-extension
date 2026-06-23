@@ -22,7 +22,6 @@ variables:
   BASE_IMAGE_REPO: "opencsghq/openclaw-csgclaw-base"
   BASE_TAG: "2026.5.26-node24-pnpm10-py3"
   IMAGE_REPO: "opencsghq/openclaw"
-  CSGCLAW_CLI_BASE_URL: "https://csgclaw.opencsg.com/releases/latest"
   # BuildKit / binfmt mirrors on ACR to avoid Docker Hub timeouts in CN CI
   BINFMT_IMAGE: "${ACR_REGISTRY}/opencsg_public/binfmt:latest"
   BUILDKIT_CI_IMAGE: "${ACR_REGISTRY}/opencsg_public/moby-buildkit:buildx-stable-1"
@@ -30,7 +29,7 @@ variables:
 stages:
   - build
 
-# Single-stage pipeline (picoclaw-style): build dist + fetch csgclaw-cli, then buildx push.
+# Single-stage pipeline: build dist, then buildx push.
 docker-build-push:
   stage: build
   image:
@@ -70,32 +69,6 @@ docker-build-push:
         bash -lc 'pnpm --version && pnpm install --frozen-lockfile && pnpm run build'
       test -f dist/index.js
       echo "dist/ ready:" && ls -la dist/
-    # Download prebuilt csgclaw-cli binaries (no Go toolchain required in CI).
-    - |
-      set -euo pipefail
-      mkdir -p docker/csgclaw-cli
-      for arch in amd64 arm64; do
-        archive="/tmp/csgclaw-cli-${arch}.tar.gz"
-        extract_dir="/tmp/csgclaw-cli-${arch}"
-        echo "Downloading csgclaw-cli linux/${arch} from ${CSGCLAW_CLI_BASE_URL}"
-        curl -fSL "${CSGCLAW_CLI_BASE_URL}/linux/${arch}?package=csgclaw-cli" -o "${archive}"
-        rm -rf "${extract_dir}"
-        mkdir -p "${extract_dir}"
-        tar -xzf "${archive}" -C "${extract_dir}"
-        bin="$(find "${extract_dir}" -type f \( -name csgclaw-cli -o -name "csgclaw-cli_linux_${arch}" \) | head -n1)"
-        if [ -z "${bin}" ]; then
-          bin="$(find "${extract_dir}" -type f -perm -111 | head -n1)"
-        fi
-        if [ -z "${bin}" ]; then
-          echo "csgclaw-cli binary not found in ${archive}" >&2
-          find "${extract_dir}" -maxdepth 3 -type f -print >&2
-          exit 1
-        fi
-        install -m0755 "${bin}" "docker/csgclaw-cli/csgclaw-cli_linux_${arch}"
-      done
-      test -s docker/csgclaw-cli/csgclaw-cli_linux_amd64
-      test -s docker/csgclaw-cli/csgclaw-cli_linux_arm64
-      echo "csgclaw-cli binaries ready:" && ls -la docker/csgclaw-cli/
     # Install binfmt for cross-arch emulation
     - |
       set -eu
@@ -117,7 +90,7 @@ docker-build-push:
       grep -Eq 'Platform:[[:space:]]+linux/amd64' /tmp/base-manifest.txt
       grep -Eq 'Platform:[[:space:]]+linux/arm64' /tmp/base-manifest.txt
     - cd "${CI_PROJECT_DIR}"
-    - echo "Build inputs ready:" && ls -la dist/ docker/csgclaw-cli/
+    - echo "Build inputs ready:" && ls -la dist/
   script:
     - |
       set -euo pipefail
@@ -145,7 +118,6 @@ docker-build-push:
           python --version >/dev/null
           node --version >/dev/null
           node /app/openclaw.mjs --version >/dev/null
-          /usr/local/bin/csgclaw-cli --help >/dev/null 2>&1
           test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js
           test -f /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
           test -f /home/node/openclaw-plugins/csgclaw-extension/package.json

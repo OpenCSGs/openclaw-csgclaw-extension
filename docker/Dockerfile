@@ -5,29 +5,15 @@
 #   -> opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw:<tag>
 # Local: make image-local  -> openclaw-csgclaw:local
 #
-# The Makefile target `prepare-csgclaw-cli` produces csgclaw-cli artifacts on
-# the host before invoking docker build. OpenClaw plugins are installed from npm
-# during the image build.
+# OpenClaw plugins are installed from npm during the image build.
 
 ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.5.26-node24-pnpm10-py3
 ARG OPENCLAW_FEISHU_VERSION=2026.5.26
 ARG CSGCLAW_EXTENSION_VERSION=0.3.9-ext.2
 
-# Select the platform-specific csgclaw-cli binary. Pre-built artifacts must
-# exist under docker/csgclaw-cli/ before invoking docker build; the Makefile
-# target `prepare-csgclaw-cli` produces them from the sibling csgclaw repo.
-FROM scratch AS csgclaw-cli
-ARG TARGETARCH
-COPY docker/csgclaw-cli/csgclaw-cli_linux_${TARGETARCH} /csgclaw-cli
-
 FROM ${OPENCLAW_BASE_IMAGE}
 ARG OPENCLAW_FEISHU_VERSION
 ARG CSGCLAW_EXTENSION_VERSION
-
-# Bake csgclaw-cli into the image so manager/worker agents do not need to
-# fetch or install it at runtime. Using --chmod keeps a single layer and
-# avoids switching to root/back to node 1000.
-COPY --from=csgclaw-cli --chmod=0755 /csgclaw-cli /usr/local/bin/csgclaw-cli
 
 USER root
 RUN mkdir -p /home/node/.openclaw/workspace/projects \
