@@ -1,15 +1,16 @@
-# OpenClaw CSGClaw runtime base + csgclaw-extension installed from npm under
+# OpenClaw CSGClaw runtime base + local csgclaw-extension installed under
 # /home/node/openclaw-plugins/csgclaw-extension
 #
 # ACR (see Makefile): make image
 #   -> opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw:<tag>
 # Local: make image-local  -> openclaw-csgclaw:local
 #
-# OpenClaw plugins are installed from npm during the image build.
+# The CSGClaw plugin is copied from the local build output; Feishu is installed
+# from npm during the image build.
 
 ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.5.26-node24-pnpm10-py3
 ARG OPENCLAW_FEISHU_VERSION=2026.5.26
-ARG CSGCLAW_EXTENSION_VERSION=0.3.9-ext.2
+ARG CSGCLAW_EXTENSION_VERSION=0.3.9-ext.3-beta.2
 
 FROM ${OPENCLAW_BASE_IMAGE}
 ARG OPENCLAW_FEISHU_VERSION
@@ -25,17 +26,15 @@ ENV HOME=/home/node
 
 # Avoid Feishu's OpenClaw ping probe; it blocks manager bot group invites.
 COPY --chown=1000:1000 docker/patch-openclaw-feishu-probe.mjs /tmp/patch-openclaw-feishu-probe.mjs
+COPY --chown=1000:1000 package.json openclaw.plugin.json /home/node/openclaw-plugins/csgclaw-extension/
+COPY --chown=1000:1000 dist /home/node/openclaw-plugins/csgclaw-extension/dist
 
 USER 1000
 RUN set -eux; \
-  tmpdir="$(mktemp -d)"; \
-  cd "$tmpdir"; \
-  npm pack --silent "csgclaw-extension@${CSGCLAW_EXTENSION_VERSION}"; \
-  tarball="$(find "$tmpdir" -maxdepth 1 -name '*.tgz' -print -quit)"; \
-  tar -xzf "$tarball" -C /home/node/openclaw-plugins/csgclaw-extension --strip-components=1; \
+  node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('/home/node/openclaw-plugins/csgclaw-extension/package.json','utf8')); if (pkg.version !== process.env.CSGCLAW_EXTENSION_VERSION) throw new Error('csgclaw-extension version mismatch: ' + pkg.version + ' != ' + process.env.CSGCLAW_EXTENSION_VERSION);"; \
+  test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js; \
   mkdir -p /home/node/openclaw-plugins/csgclaw-extension/node_modules; \
   ln -sfn /app /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw; \
-  rm -rf "$tmpdir"; \
   tmpdir="$(mktemp -d)"; \
   cd "$tmpdir"; \
   npm pack --silent "@openclaw/feishu@${OPENCLAW_FEISHU_VERSION}"; \
