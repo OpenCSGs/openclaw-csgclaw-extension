@@ -2,7 +2,7 @@
 REGISTRY ?= opencsg-registry.cn-beijing.cr.aliyuncs.com
 IMAGE_REPO ?= opencsghq/openclaw
 # Bump date segment or .<n> when publishing (release counter per day).
-TAG ?= 20260702.3-csgclaw-beta
+TAG ?= 20260715.1-csgclaw-beta
 # Optional additional tags for environment aliases or staged promotion.
 # Example: make image EXTRA_TAGS="dev-csgclaw stg-csgclaw"
 EXTRA_TAGS ?=
@@ -24,7 +24,7 @@ PNPM ?= pnpm
 OPENCLAW_BASE_VERSION ?= 2026.5.26
 OPENCLAW_UPSTREAM_IMAGE ?= ghcr.io/openclaw/openclaw:$(OPENCLAW_BASE_VERSION)-slim
 OPENCLAW_FEISHU_VERSION ?= $(OPENCLAW_BASE_VERSION)
-CSGCLAW_EXTENSION_VERSION ?= 0.3.9-ext.3-beta.2
+CSGCLAW_EXTENSION_VERSION ?= 0.3.9-ext.3-beta.3
 BASE_IMAGE_REPO ?= opencsghq/openclaw-csgclaw-base
 BASE_TAG ?= $(OPENCLAW_BASE_VERSION)-node24-pnpm10-py3
 OPENCLAW_BASE_IMAGE ?= $(REGISTRY)/$(BASE_IMAGE_REPO):$(BASE_TAG)

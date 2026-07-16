@@ -1,6 +1,6 @@
 {
   "name": "csgclaw-extension",
-  "version": "0.3.9-ext.3-beta.2",
+  "version": "0.3.9-ext.3-beta.3",
   "description": "OpenClaw channel plugin: CSGClaw participant bridge (SSE + REST)",
   "type": "module",
   "main": "dist/index.js",
@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "pnpm run build && node --test test/*.test.mjs",
     "prepack": "tsc -p tsconfig.json"
   },
   "devDependencies": {

@@ -14,7 +14,7 @@
 #   OPENCLAW_BASE_IMAGE   pre-baked OpenClaw+CSGClaw runtime base image
 #   OPENCLAW_BASE_TAG     tag for the default pre-baked runtime base image
 #   OPENCLAW_FEISHU_VERSION Feishu plugin npm version (defaults to OPENCLAW_BASE_VERSION)
-#   CSGCLAW_EXTENSION_VERSION csgclaw-extension version (defaults to 0.3.9-ext.3-beta.2)
+#   CSGCLAW_EXTENSION_VERSION csgclaw-extension version (defaults to 0.3.9-ext.3-beta.3)
 #   SKIP_BINFMT_INSTALL   set true when the runner host already has qemu
 #
 # Trigger: push a Git tag. The exact Git tag is used as the Docker image tag,
@@ -30,7 +30,7 @@ variables:
   BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
   DOCKER_PLATFORMS: "linux/amd64,linux/arm64"
   OPENCLAW_BASE_VERSION: "2026.5.26"
-  CSGCLAW_EXTENSION_VERSION: "0.3.9-ext.3-beta.2"
+  CSGCLAW_EXTENSION_VERSION: "0.3.9-ext.3-beta.3"
   OPENCLAW_BASE_REPO: "opencsghq/openclaw-csgclaw-base"
   CI_DOCKER_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3"
   CI_DIND_IMAGE: "${CI_IMAGE_REGISTRY}/opencsg_public/docker:27.3-dind"
@@ -88,7 +88,7 @@ docker-build-push:
     - export OPENCLAW_BASE_TAG="${OPENCLAW_BASE_TAG:-${OPENCLAW_BASE_VERSION}-node24-pnpm10-py3}"
     - export OPENCLAW_BASE_IMAGE="${OPENCLAW_BASE_IMAGE:-${ACR_REGISTRY}/${OPENCLAW_BASE_REPO}:${OPENCLAW_BASE_TAG}}"
     - export OPENCLAW_FEISHU_VERSION="${OPENCLAW_FEISHU_VERSION:-${OPENCLAW_BASE_VERSION}}"
-    - export CSGCLAW_EXTENSION_VERSION="${CSGCLAW_EXTENSION_VERSION:-0.3.9-ext.3-beta.2}"
+    - export CSGCLAW_EXTENSION_VERSION="${CSGCLAW_EXTENSION_VERSION:-0.3.9-ext.3-beta.3}"
     - echo "IMAGE_TAG=${IMAGE_TAG}" && echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
     - echo "OPENCLAW_UPSTREAM_IMAGE=${OPENCLAW_UPSTREAM_IMAGE}"
     - echo "OPENCLAW_BASE_IMAGE=${OPENCLAW_BASE_IMAGE}"
