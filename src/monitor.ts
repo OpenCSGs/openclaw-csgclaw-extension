@@ -1,4 +1,5 @@
-import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
+import { randomUUID } from "node:crypto";
+import { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-message";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { ChannelGatewayContext } from "openclaw/plugin-sdk";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
@@ -13,6 +14,7 @@ import {
   resolveFeishuAccountId,
 } from "./config.js";
 import { consumeSseStream } from "./sse.js";
+import { createCsgclawWorkLeaseReporter } from "./work-lease.js";
 
 type CsgclawEventContext = {
   channel?: string;
@@ -88,6 +90,7 @@ const csgclawAgentActivityType = "com.opencsg.csgclaw.agent.activity";
 const csgclawAgentToolMsgType = "com.opencsg.csgclaw.agent.tool";
 const maxFailureReplyDetailLength = 1200;
 const maxMetadataDepth = 8;
+const workLeaseKeepaliveIntervalMs = 5_000;
 
 function readBoolean(v: unknown): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
@@ -921,11 +924,32 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             },
           });
 
-          const { onModelSelected, ...replyPipeline } = createChannelReplyPipeline({
+          const work = createCsgclawWorkLeaseReporter({
+            account,
+            participantId: account.participantId,
+            roomId,
+            threadRootId: topicId || payload.thread_root_id,
+            requestId: ctxPayload.MessageSid,
+            leaseId: randomUUID(),
+            log: ctx.log,
+          });
+          const { onModelSelected, ...replyPipeline } = createChannelMessageReplyPipeline({
             cfg,
             agentId: route.agentId,
             channel: "csgclaw",
             accountId: ctx.accountId,
+            typing: {
+              start: work.startOrRenew,
+              stop: work.stop,
+              keepaliveIntervalMs: workLeaseKeepaliveIntervalMs,
+              // Work leases already expire server-side when renewal stops. Do not
+              // apply the typing indicator's 60s cap to long-running agent turns.
+              maxDurationMs: 0,
+              onStartError: (err) =>
+                ctx.log?.warn?.(`csgclaw: work lease start callback failed: ${formatErrorMessage(err)}`),
+              onStopError: (err) =>
+                ctx.log?.warn?.(`csgclaw: work lease stop callback failed: ${formatErrorMessage(err)}`),
+            },
           });
           const activityReplyOptions = createCsgclawActivityReplyOptions({
             account,
@@ -1113,7 +1137,7 @@ export async function monitorCsgclawFeishuProvider(
             },
           });
 
-          const { onModelSelected, ...replyPipeline } = createChannelReplyPipeline({
+          const { onModelSelected, ...replyPipeline } = createChannelMessageReplyPipeline({
             cfg,
             agentId: route.agentId,
             channel: "feishu",

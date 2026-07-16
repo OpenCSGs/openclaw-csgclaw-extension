@@ -104,6 +104,10 @@ export function messagesUrl(account: ResolvedCsgclawAccount): string {
   return participantAPIUrl(account, "/messages");
 }
 
+export function workLeaseUrl(account: ResolvedCsgclawAccount, leaseId: string): string {
+  return participantAPIUrl(account, `/work-leases/${encodeURIComponent(leaseId.trim())}`);
+}
+
 export function feishuEventsUrl(account: ResolvedCsgclawAccount): string {
   return `${account.baseUrl}/api/v1/channels/feishu/participants/${encodeURIComponent(account.participantId)}/events`;
 }
