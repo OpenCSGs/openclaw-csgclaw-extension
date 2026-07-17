@@ -1,7 +1,5 @@
 # openclaw-csgclaw-extension
 
-[![PR](https://github.com/OpenCSGs/openclaw-csgclaw-extension/actions/workflows/pr.yml/badge.svg)](https://github.com/OpenCSGs/openclaw-csgclaw-extension/actions/workflows/pr.yml)
-
 An [OpenClaw](https://github.com/openclaw/openclaw) channel plugin that connects OpenClaw agents to [CSGClaw](https://github.com/OpenCSGs/csgclaw).
 
 The plugin receives messages through CSGClaw's participant SSE API and sends agent replies through its REST API.
