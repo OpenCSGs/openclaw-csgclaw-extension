@@ -2,6 +2,7 @@ import type { ResolvedCsgclawAccount } from "./config.js";
 import { workLeaseUrl } from "./config.js";
 
 const DEFAULT_TTL_SECONDS = 15;
+const DEFAULT_RENEW_INTERVAL_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 2_000;
 const LEGACY_SERVER_PAUSE_MS = 5 * 60_000;
 
@@ -28,6 +29,13 @@ export type CsgclawWorkLeaseReporterOptions = {
 export type CsgclawWorkLeaseReporter = {
   startOrRenew: () => Promise<void>;
   stop: () => Promise<void>;
+};
+
+export type CsgclawWorkLeaseDispatchOptions<T> = {
+  dispatch: () => Promise<T>;
+  log?: WorkLeaseLog;
+  renewIntervalMs?: number;
+  reporter: CsgclawWorkLeaseReporter;
 };
 
 const unsupportedUntilByAccount = new Map<string, number>();
@@ -167,6 +175,48 @@ export function createCsgclawWorkLeaseReporter(
       }
     },
   };
+}
+
+/**
+ * Covers one admitted OpenClaw reply dispatch with a work lease.
+ *
+ * Reporting is deliberately best-effort: starting or renewing the lease must
+ * never delay or fail the reply itself. The final stop is awaited so the lease
+ * remains active through normal delivery, visible failure delivery, and abort
+ * cleanup.
+ */
+export async function dispatchWithCsgclawWorkLease<T>(
+  options: CsgclawWorkLeaseDispatchOptions<T>,
+): Promise<T> {
+  const renewIntervalMs = Math.max(1, options.renewIntervalMs ?? DEFAULT_RENEW_INTERVAL_MS);
+  const startOrRenew = (phase: "start" | "renew") => {
+    try {
+      void options.reporter.startOrRenew().catch((error) => {
+        options.log?.warn?.(
+          `csgclaw: work lease dispatch ${phase} failed: ${formatWorkLeaseError(error)}`,
+        );
+      });
+    } catch (error) {
+      options.log?.warn?.(
+        `csgclaw: work lease dispatch ${phase} failed: ${formatWorkLeaseError(error)}`,
+      );
+    }
+  };
+
+  startOrRenew("start");
+  const renewTimer = setInterval(() => startOrRenew("renew"), renewIntervalMs);
+  try {
+    return await options.dispatch();
+  } finally {
+    clearInterval(renewTimer);
+    try {
+      await options.reporter.stop();
+    } catch (error) {
+      options.log?.warn?.(
+        `csgclaw: work lease dispatch stop failed: ${formatWorkLeaseError(error)}`,
+      );
+    }
+  }
 }
 
 function accountReporterPaused(key: string, now: number): boolean {
