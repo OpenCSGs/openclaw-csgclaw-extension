@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createCsgclawWorkLeaseReporter,
+  dispatchWithCsgclawWorkLease,
   resetWorkLeaseCompatibilityBreakersForTest,
 } from "../dist/src/work-lease.js";
 
@@ -116,4 +117,85 @@ test("timeouts and 5xx responses do not open the compatibility breaker", async (
   await reporter.startOrRenew();
   assert.equal(requestCount, 2);
   await reporter.stop();
+});
+
+test("dispatch lifecycle starts before dispatch and stops after delivery", async () => {
+  const order = [];
+  const reporter = {
+    async startOrRenew() {
+      order.push("start");
+    },
+    async stop() {
+      order.push("stop");
+    },
+  };
+
+  const result = await dispatchWithCsgclawWorkLease({
+    dispatch: async () => {
+      order.push("dispatch");
+      await Promise.resolve();
+      order.push("delivered");
+      return "ok";
+    },
+    reporter,
+  });
+
+  assert.equal(result, "ok");
+  assert.deepEqual(order, ["start", "dispatch", "delivered", "stop"]);
+});
+
+test("dispatch lifecycle renews independently of OpenClaw typing", async () => {
+  let renewCount = 0;
+  let stopCount = 0;
+  const reporter = {
+    async startOrRenew() {
+      renewCount += 1;
+    },
+    async stop() {
+      stopCount += 1;
+    },
+  };
+
+  await dispatchWithCsgclawWorkLease({
+    dispatch: async () => await new Promise((resolve) => setTimeout(resolve, 25)),
+    renewIntervalMs: 5,
+    reporter,
+  });
+
+  assert.ok(renewCount >= 2);
+  assert.equal(stopCount, 1);
+});
+
+test("reporting failures do not mask dispatch results or errors", async () => {
+  const warnings = [];
+  const reporter = {
+    async startOrRenew() {
+      throw new Error("start unavailable");
+    },
+    async stop() {
+      throw new Error("stop unavailable");
+    },
+  };
+
+  const result = await dispatchWithCsgclawWorkLease({
+    dispatch: async () => "reply delivered",
+    log: { warn: (message) => warnings.push(message) },
+    reporter,
+  });
+  assert.equal(result, "reply delivered");
+  assert.equal(warnings.length, 2);
+
+  const dispatchError = new Error("dispatch failed");
+  await assert.rejects(
+    dispatchWithCsgclawWorkLease({
+      dispatch: async () => {
+        throw dispatchError;
+      },
+      reporter: {
+        async startOrRenew() {},
+        async stop() {},
+      },
+    }),
+    (error) => error === dispatchError,
+  );
 });

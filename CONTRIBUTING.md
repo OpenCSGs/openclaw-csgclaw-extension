@@ -130,19 +130,12 @@ GitLab CI automatically triggers when `main` is updated via mirror sync (default
 ### Version Bump Process
 
 1. Update `version` in `package.json`
-2. Update `CSGCLAW_EXTENSION_VERSION` in:
-   - `Makefile`
-   - `docker/Dockerfile`
-3. Update `OPENCLAW_BASE_VERSION` if upgrading OpenClaw base
-4. Commit changes to `main`
-5. Push to GitHub → GitLab mirror sync → CI auto-build
+2. Update `OPENCLAW_BASE_VERSION` if upgrading OpenClaw base
+3. Commit changes to `main`
+4. Push to GitHub → GitLab mirror sync → CI auto-build
 
-### Version Sync Checklist
-
-These three fields **must** stay in sync:
-- [ ] `package.json` → `version`
-- [ ] `Makefile` → `CSGCLAW_EXTENSION_VERSION`
-- [ ] `docker/Dockerfile` → `ARG CSGCLAW_EXTENSION_VERSION`
+`package.json` is the single source of truth for the plugin version. Docker
+builds copy it into the image and do not maintain a separate version value.
 
 ### npm Package (Optional)
 

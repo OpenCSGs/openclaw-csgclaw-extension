@@ -10,11 +10,9 @@
 
 ARG OPENCLAW_BASE_IMAGE=opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw-csgclaw-base:2026.5.26-node24-pnpm10-py3
 ARG OPENCLAW_FEISHU_VERSION=2026.5.26
-ARG CSGCLAW_EXTENSION_VERSION=0.3.9-ext.3-beta.3
 
 FROM ${OPENCLAW_BASE_IMAGE}
 ARG OPENCLAW_FEISHU_VERSION
-ARG CSGCLAW_EXTENSION_VERSION
 
 USER root
 RUN mkdir -p /home/node/.openclaw/workspace/projects \
@@ -31,7 +29,6 @@ COPY --chown=1000:1000 dist /home/node/openclaw-plugins/csgclaw-extension/dist
 
 USER 1000
 RUN set -eux; \
-  node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('/home/node/openclaw-plugins/csgclaw-extension/package.json','utf8')); if (pkg.version !== process.env.CSGCLAW_EXTENSION_VERSION) throw new Error('csgclaw-extension version mismatch: ' + pkg.version + ' != ' + process.env.CSGCLAW_EXTENSION_VERSION);"; \
   test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js; \
   mkdir -p /home/node/openclaw-plugins/csgclaw-extension/node_modules; \
   ln -sfn /app /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw; \

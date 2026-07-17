@@ -14,7 +14,10 @@ import {
   resolveFeishuAccountId,
 } from "./config.js";
 import { consumeSseStream } from "./sse.js";
-import { createCsgclawWorkLeaseReporter } from "./work-lease.js";
+import {
+  createCsgclawWorkLeaseReporter,
+  dispatchWithCsgclawWorkLease,
+} from "./work-lease.js";
 
 type CsgclawEventContext = {
   channel?: string;
@@ -90,7 +93,7 @@ const csgclawAgentActivityType = "com.opencsg.csgclaw.agent.activity";
 const csgclawAgentToolMsgType = "com.opencsg.csgclaw.agent.tool";
 const maxFailureReplyDetailLength = 1200;
 const maxMetadataDepth = 8;
-const workLeaseKeepaliveIntervalMs = 5_000;
+const workLeaseRenewIntervalMs = 5_000;
 
 function readBoolean(v: unknown): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
@@ -938,18 +941,6 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             agentId: route.agentId,
             channel: "csgclaw",
             accountId: ctx.accountId,
-            typing: {
-              start: work.startOrRenew,
-              stop: work.stop,
-              keepaliveIntervalMs: workLeaseKeepaliveIntervalMs,
-              // Work leases already expire server-side when renewal stops. Do not
-              // apply the typing indicator's 60s cap to long-running agent turns.
-              maxDurationMs: 0,
-              onStartError: (err) =>
-                ctx.log?.warn?.(`csgclaw: work lease start callback failed: ${formatErrorMessage(err)}`),
-              onStopError: (err) =>
-                ctx.log?.warn?.(`csgclaw: work lease stop callback failed: ${formatErrorMessage(err)}`),
-            },
           });
           const activityReplyOptions = createCsgclawActivityReplyOptions({
             account,
@@ -959,56 +950,63 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             sessionKey: ctxPayload.SessionKey,
           });
 
-          await dispatchReplyWithVisibleFailure({
-            label: "csgclaw",
-            abortSignal: ctx.abortSignal,
-            log: ctx.log,
+          await dispatchWithCsgclawWorkLease({
             dispatch: async () => {
-              await core.reply.dispatchReplyWithBufferedBlockDispatcher({
-                ctx: ctxPayload,
-                cfg,
-                dispatcherOptions: {
-                  ...replyPipeline,
-                  deliver: async (payload: ReplyPayload, info: ReplyDeliveryInfo) => {
-                    const out = (payload.text ?? "").trim();
-                    if (!out) {
-                      return;
-                    }
-                    await postSend(
-                      account,
-                      chatId,
-                      out,
-                      openclawDeliveryMetadata({
-                        channel: "csgclaw",
-                        info,
-                        payload,
-                        requestId: ctxPayload.MessageSid,
-                        sessionKey: ctxPayload.SessionKey,
-                      }),
-                    );
-                  },
+              await dispatchReplyWithVisibleFailure({
+                label: "csgclaw",
+                abortSignal: ctx.abortSignal,
+                log: ctx.log,
+                dispatch: async () => {
+                  await core.reply.dispatchReplyWithBufferedBlockDispatcher({
+                    ctx: ctxPayload,
+                    cfg,
+                    dispatcherOptions: {
+                      ...replyPipeline,
+                      deliver: async (payload: ReplyPayload, info: ReplyDeliveryInfo) => {
+                        const out = (payload.text ?? "").trim();
+                        if (!out) {
+                          return;
+                        }
+                        await postSend(
+                          account,
+                          chatId,
+                          out,
+                          openclawDeliveryMetadata({
+                            channel: "csgclaw",
+                            info,
+                            payload,
+                            requestId: ctxPayload.MessageSid,
+                            sessionKey: ctxPayload.SessionKey,
+                          }),
+                        );
+                      },
+                    },
+                    replyOptions: {
+                      onModelSelected,
+                      suppressDefaultToolProgressMessages: true,
+                      ...activityReplyOptions,
+                    },
+                  });
                 },
-                replyOptions: {
-                  onModelSelected,
-                  suppressDefaultToolProgressMessages: true,
-                  ...activityReplyOptions,
+                deliverFailure: async (text) => {
+                  await postSend(
+                    account,
+                    chatId,
+                    text,
+                    openclawDeliveryMetadata({
+                      channel: "csgclaw",
+                      info: { kind: "final" },
+                      payload: { isError: true },
+                      requestId: ctxPayload.MessageSid,
+                      sessionKey: ctxPayload.SessionKey,
+                    }),
+                  );
                 },
               });
             },
-            deliverFailure: async (text) => {
-              await postSend(
-                account,
-                chatId,
-                text,
-                openclawDeliveryMetadata({
-                  channel: "csgclaw",
-                  info: { kind: "final" },
-                  payload: { isError: true },
-                  requestId: ctxPayload.MessageSid,
-                  sessionKey: ctxPayload.SessionKey,
-                }),
-              );
-            },
+            log: ctx.log,
+            renewIntervalMs: workLeaseRenewIntervalMs,
+            reporter: work,
           });
         },
       });

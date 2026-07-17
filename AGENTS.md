@@ -10,12 +10,11 @@
 
 ## Key Info (Not Obvious from Code)
 
-### Version Sync
+### Version Source
 
-Three places must stay in sync when bumping version:
-1. `package.json` → `version`
-2. `Makefile` → `CSGCLAW_EXTENSION_VERSION`
-3. `docker/Dockerfile` → `ARG CSGCLAW_EXTENSION_VERSION`
+`package.json` → `version` is the single source of truth. Docker builds copy
+`package.json` into the image; do not add a separate extension version variable
+to the Makefile, Dockerfiles, or CI configuration.
 
 ### Docker Images
 
@@ -61,10 +60,9 @@ make base-image           # rebuild base (rare)
 ## Release Checklist
 
 1. Bump version in `package.json`
-2. Sync `CSGCLAW_EXTENSION_VERSION` in `Makefile` + `docker/Dockerfile`
-3. Commit & push to `main`
-4. Wait for GitLab mirror sync → CI auto-build
-5. Verify image on ACR
+2. Commit & push to `main`
+3. Wait for GitLab mirror sync → CI auto-build
+4. Verify image on ACR
 
 ---
 
