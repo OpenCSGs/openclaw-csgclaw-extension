@@ -24,7 +24,6 @@ PNPM ?= pnpm
 OPENCLAW_BASE_VERSION ?= 2026.5.26
 OPENCLAW_UPSTREAM_IMAGE ?= ghcr.io/openclaw/openclaw:$(OPENCLAW_BASE_VERSION)-slim
 OPENCLAW_FEISHU_VERSION ?= $(OPENCLAW_BASE_VERSION)
-CSGCLAW_EXTENSION_VERSION ?= 0.3.9-ext.3-beta.3
 BASE_IMAGE_REPO ?= opencsghq/openclaw-csgclaw-base
 BASE_TAG ?= $(OPENCLAW_BASE_VERSION)-node24-pnpm10-py3
 OPENCLAW_BASE_IMAGE ?= $(REGISTRY)/$(BASE_IMAGE_REPO):$(BASE_TAG)
@@ -63,7 +62,6 @@ image: prepare-dist
 	  --platform $(PLATFORMS) \
 	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
 	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
-	  --build-arg CSGCLAW_EXTENSION_VERSION=$(CSGCLAW_EXTENSION_VERSION) \
 	  $(IMAGE_TAG_ARGS) \
 	  --push \
 	  -f docker/Dockerfile .
@@ -74,7 +72,6 @@ image-local: prepare-dist
 	  --platform $(PLATFORM) \
 	  --build-arg OPENCLAW_BASE_IMAGE=$(OPENCLAW_BASE_IMAGE) \
 	  --build-arg OPENCLAW_FEISHU_VERSION=$(OPENCLAW_FEISHU_VERSION) \
-	  --build-arg CSGCLAW_EXTENSION_VERSION=$(CSGCLAW_EXTENSION_VERSION) \
 	  -t openclaw-csgclaw:local \
 	  --load \
 	  -f docker/Dockerfile .
