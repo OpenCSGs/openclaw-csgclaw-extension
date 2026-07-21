@@ -277,7 +277,7 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
       leaseStarted = true;
       notifyStopRequested(response);
       if (!latestStatus) {
-        queueStatus({ phase: "working" });
+        queueStatus({ phase: "thinking" });
       } else if (statusVersion > attemptedStatusVersion) {
         scheduleStatus(0);
       }

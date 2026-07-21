@@ -238,7 +238,7 @@ test("negotiates capabilities and reports bounded full thinking snapshots", asyn
   const initial = calls.find((call) => call.method === "PATCH");
   assert.deepEqual(initial.body.capabilities, ["thinking_status_v1", "turn_stop_v1"]);
   assert.equal(initial.body.sequence, 1);
-  assert.equal(initial.body.phase, "working");
+  assert.equal(initial.body.phase, "thinking");
 
   await reporter.updateStatus({
     phase: "thinking",
