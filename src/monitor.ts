@@ -6,18 +6,9 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import type { ResolvedCsgclawAccount } from "./config.js";
-import {
-  eventsUrl,
-  feishuEventsUrl,
-  feishuMessagesUrl,
-  messagesUrl,
-  resolveFeishuAccountId,
-} from "./config.js";
+import { eventsUrl, feishuEventsUrl, feishuMessagesUrl, messagesUrl, resolveFeishuAccountId } from "./config.js";
 import { consumeSseStream } from "./sse.js";
-import {
-  createCsgclawWorkLeaseReporter,
-  dispatchWithCsgclawWorkLease,
-} from "./work-lease.js";
+import { createCsgclawWorkLeaseReporter, dispatchWithCsgclawWorkLease } from "./work-lease.js";
 
 type CsgclawEventContext = {
   channel?: string;
@@ -38,6 +29,14 @@ type CsgclawSsePayload = {
   timestamp?: string;
   mentions?: string[];
   context?: CsgclawEventContext;
+};
+
+type CsgclawStopControlPayload = {
+  participant_id?: string;
+  room_id?: string;
+  lease_id?: string;
+  request_id?: string;
+  requested_at?: string;
 };
 
 type CsgclawFeishuSsePayload = {
@@ -94,15 +93,78 @@ const csgclawAgentToolMsgType = "com.opencsg.csgclaw.agent.tool";
 const maxFailureReplyDetailLength = 1200;
 const maxMetadataDepth = 8;
 const workLeaseRenewIntervalMs = 5_000;
+const maxQueuedCsgclawMessages = 64;
+
+export class BoundedDispatchQueue {
+  private readonly pending: Array<() => Promise<void>> = [];
+  private running = false;
+  private closed = false;
+
+  constructor(
+    private readonly capacity: number,
+    private readonly onError?: (error: unknown) => void,
+  ) {}
+
+  enqueue(task: () => Promise<void>): boolean {
+    if (this.closed || this.pending.length >= this.capacity) {
+      return false;
+    }
+    this.pending.push(task);
+    void this.drain();
+    return true;
+  }
+
+  close(): void {
+    this.closed = true;
+    this.pending.length = 0;
+  }
+
+  private async drain(): Promise<void> {
+    if (this.running) {
+      return;
+    }
+    this.running = true;
+    try {
+      while (!this.closed) {
+        const task = this.pending.shift();
+        if (!task) {
+          return;
+        }
+        try {
+          await task();
+        } catch (error) {
+          this.onError?.(error);
+        }
+      }
+    } finally {
+      this.running = false;
+    }
+  }
+}
+
+function abortTurn(controller: AbortController, reason: string): void {
+  if (controller.signal.aborted) {
+    return;
+  }
+  controller.abort(Object.assign(new Error(reason), { name: "AbortError" }));
+}
+
+function combinedAbortSignal(channelSignal: AbortSignal, turnSignal: AbortSignal): AbortSignal {
+  if (channelSignal.aborted) {
+    return channelSignal;
+  }
+  if (turnSignal.aborted) {
+    return turnSignal;
+  }
+  return AbortSignal.any([channelSignal, turnSignal]);
+}
 
 function readBoolean(v: unknown): boolean | undefined {
   return typeof v === "boolean" ? v : undefined;
 }
 
 function readRecord(v: unknown): Record<string, unknown> | undefined {
-  return v && typeof v === "object" && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : undefined;
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
 }
 
 function readString(v: unknown): string {
@@ -130,9 +192,7 @@ function metadataValue(v: unknown, seen = new WeakSet<object>(), depth = maxMeta
   }
   seen.add(v);
   if (Array.isArray(v)) {
-    const values = v
-      .map((item) => metadataValue(item, seen, depth - 1))
-      .filter((item) => item !== undefined);
+    const values = v.map((item) => metadataValue(item, seen, depth - 1)).filter((item) => item !== undefined);
     return values;
   }
   const out: Record<string, unknown> = {};
@@ -378,7 +438,13 @@ function createCsgclawActivityReplyOptions(params: {
       const statusSummary = commandOutputSummary(payload);
       const body = output || statusSummary || title;
       const tool: Record<string, unknown> = {
-        id: id || toolEventId({ prefix: "command", requestId: params.requestId, phase: payload.phase }),
+        id:
+          id ||
+          toolEventId({
+            prefix: "command",
+            requestId: params.requestId,
+            phase: payload.phase,
+          }),
         kind: readString(payload.name) || "command",
         phase: readString(payload.phase) || undefined,
         status: readString(payload.status) || "completed",
@@ -418,7 +484,13 @@ function createCsgclawActivityReplyOptions(params: {
       const summary = readString(payload.progressText) || readString(payload.summary);
       const body = summary || `${title} · ${status}`;
       const tool: Record<string, unknown> = {
-        id: id || toolEventId({ prefix: "item", requestId: params.requestId, phase: payload.phase }),
+        id:
+          id ||
+          toolEventId({
+            prefix: "item",
+            requestId: params.requestId,
+            phase: payload.phase,
+          }),
         kind: readString(payload.name) || kind || "tool",
         phase: readString(payload.phase) || undefined,
         status,
@@ -468,9 +540,7 @@ async function dispatchReplyWithVisibleFailure(params: {
     try {
       await params.deliverFailure(failureReply);
     } catch (sendErr) {
-      params.log?.error?.(
-        `${params.label}: failed to send visible reply failure: ${formatErrorMessage(sendErr)}`,
-      );
+      params.log?.error?.(`${params.label}: failed to send visible reply failure: ${formatErrorMessage(sendErr)}`);
     }
   }
 }
@@ -496,11 +566,7 @@ export function isCsgclawFeishuBridgeConfigured(cfg: OpenClawConfig, participant
   return readString(feishu.defaultAccount) === feishuAccountId;
 }
 
-function feishuBodyForAgent(params: {
-  messageId: string;
-  senderId: string;
-  content: string;
-}): string {
+function feishuBodyForAgent(params: { messageId: string; senderId: string; content: string }): string {
   const prefix = params.messageId ? `[message_id: ${params.messageId}]\n` : "";
   return `${prefix}${params.senderId}: ${params.content}`;
 }
@@ -515,8 +581,7 @@ function resolveCsgclawGroupRequireMention(cfg: OpenClawConfig, roomId: string):
   const groups = readRecord(csgclaw.groups);
   const roomGroup = readRecord(groups?.[roomId]);
   const defaultGroup = readRecord(groups?.["*"]);
-  const configured =
-    readBoolean(roomGroup?.requireMention) ?? readBoolean(defaultGroup?.requireMention);
+  const configured = readBoolean(roomGroup?.requireMention) ?? readBoolean(defaultGroup?.requireMention);
   if (typeof configured === "boolean") {
     return configured;
   }
@@ -598,7 +663,10 @@ function topicChatId(roomId: string, topicId: string): string {
   return `${roomId}/${topicId}`;
 }
 
-export function splitTopicChatId(chatId: string): { roomId: string; topicId: string } {
+export function splitTopicChatId(chatId: string): {
+  roomId: string;
+  topicId: string;
+} {
   const trimmed = chatId.trim();
   if (!trimmed) {
     return { roomId: "", topicId: "" };
@@ -709,11 +777,7 @@ function normalizeInboundAtMentions(content: string): string {
   return normalized;
 }
 
-function isInboundBotMentioned(
-  payload: CsgclawSsePayload,
-  participantId: string,
-  content: string,
-): boolean {
+function isInboundBotMentioned(payload: CsgclawSsePayload, participantId: string, content: string): boolean {
   for (const id of inboundMentionIds(payload, participantId)) {
     if (hasInboundBotAtMention(content, id)) {
       return true;
@@ -822,6 +886,28 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
   }
 
   const cfg = ctx.cfg as OpenClawConfig;
+  const activeTurnsByLeaseID = new Map<
+    string,
+    {
+      controller: AbortController;
+      requestId: string;
+      roomId: string;
+      sessionKey: string;
+    }
+  >();
+  const dispatchQueue = new BoundedDispatchQueue(maxQueuedCsgclawMessages, (error) => {
+    if (!ctx.abortSignal.aborted) {
+      ctx.log?.warn?.(`csgclaw: queued reply dispatch failed: ${formatErrorMessage(error)}`);
+    }
+  });
+  const stopAllTurns = () => {
+    dispatchQueue.close();
+    for (const active of activeTurnsByLeaseID.values()) {
+      abortTurn(active.controller, "csgclaw channel stopped");
+    }
+    activeTurnsByLeaseID.clear();
+  };
+  ctx.abortSignal.addEventListener("abort", stopAllTurns, { once: true });
 
   while (!ctx.abortSignal.aborted) {
     try {
@@ -829,185 +915,255 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
         url,
         headers,
         signal: ctx.abortSignal,
-        onEvent: async (eventName, data) => {
+        onEvent: (eventName, data) => {
+          if (eventName === "participant.work.stop_requested") {
+            let control: CsgclawStopControlPayload;
+            try {
+              control = JSON.parse(data) as CsgclawStopControlPayload;
+            } catch {
+              return;
+            }
+            const leaseId = readString(control.lease_id);
+            const active = activeTurnsByLeaseID.get(leaseId);
+            if (
+              active &&
+              active.roomId === readString(control.room_id) &&
+              active.requestId === readString(control.request_id)
+            ) {
+              abortTurn(active.controller, "csgclaw turn stop requested");
+            }
+            return;
+          }
           if (eventName !== "message") {
             return;
           }
-          let payload: CsgclawSsePayload;
-          try {
-            payload = JSON.parse(data) as CsgclawSsePayload;
-          } catch {
-            return;
-          }
-
-          const roomId = resolvedRoomId(payload);
-          const topicId = resolvedTopicId(payload);
-          const chatId = topicChatId(roomId, topicId);
-          const senderId = payload.sender?.id?.trim() ?? "";
-          if (!roomId || !senderId) {
-            return;
-          }
-
-          let rawBody = payload.text ?? "";
-          const chatType =
-            payload.chat_type === "direct" || payload.chat_type === "group"
-              ? payload.chat_type
-              : "group";
-
-          let wasMentioned = isInboundBotMentioned(payload, account.participantId, rawBody);
-          if (chatType === "group") {
-            if (!wasMentioned && hasInboundAtMention(rawBody)) {
-              ctx.log?.debug?.("csgclaw: skipped group message with unrelated @ mention");
+          const accepted = dispatchQueue.enqueue(async () => {
+            let payload: CsgclawSsePayload;
+            try {
+              payload = JSON.parse(data) as CsgclawSsePayload;
+            } catch {
               return;
             }
-            rawBody = normalizeInboundAtMentions(rawBody);
-            wasMentioned = isInboundBotMentioned(payload, account.participantId, rawBody);
-          }
 
-          if (
-            !shouldDispatchCsgclawInbound({
+            const roomId = resolvedRoomId(payload);
+            const topicId = resolvedTopicId(payload);
+            const chatId = topicChatId(roomId, topicId);
+            const senderId = payload.sender?.id?.trim() ?? "";
+            if (!roomId || !senderId) {
+              return;
+            }
+
+            let rawBody = payload.text ?? "";
+            const chatType =
+              payload.chat_type === "direct" || payload.chat_type === "group" ? payload.chat_type : "group";
+
+            let wasMentioned = isInboundBotMentioned(payload, account.participantId, rawBody);
+            if (chatType === "group") {
+              if (!wasMentioned && hasInboundAtMention(rawBody)) {
+                ctx.log?.debug?.("csgclaw: skipped group message with unrelated @ mention");
+                return;
+              }
+              rawBody = normalizeInboundAtMentions(rawBody);
+              wasMentioned = isInboundBotMentioned(payload, account.participantId, rawBody);
+            }
+
+            if (
+              !shouldDispatchCsgclawInbound({
+                cfg,
+                chatType,
+                roomId,
+                wasMentioned,
+              })
+            ) {
+              ctx.log?.debug?.("csgclaw: skipped unmentioned group message");
+              return;
+            }
+
+            const route = core.routing.resolveAgentRoute({
               cfg,
-              chatType,
+              channel: "csgclaw",
+              accountId: ctx.accountId,
+              peer: { kind: chatType, id: chatId },
+            });
+
+            const body = core.reply.formatAgentEnvelope({
+              channel: "CSGClaw",
+              from: payload.sender?.display_name || payload.sender?.username || senderId,
+              timestamp: parseTimestampMs(payload.timestamp),
+              envelope: core.reply.resolveEnvelopeFormatOptions(cfg),
+              body: rawBody,
+            });
+
+            const ctxPayload = core.reply.finalizeInboundContext({
+              Body: body,
+              BodyForAgent: rawBody,
+              RawBody: rawBody,
+              CommandBody: rawBody,
+              From: `csgclaw:user:${senderId}`,
+              To: `csgclaw:room:${chatId}`,
+              SessionKey: route.sessionKey,
+              AccountId: route.accountId,
+              ChatType: chatType,
+              ConversationLabel: chatId,
+              SenderName: payload.sender?.display_name ?? payload.sender?.username ?? senderId,
+              SenderId: senderId,
+              SenderUsername: payload.sender?.username ?? senderId,
+              Provider: "csgclaw",
+              Surface: "csgclaw",
+              MessageSid: payload.message_id ?? "",
+              OriginatingChannel: "csgclaw",
+              OriginatingTo: `csgclaw:room:${chatId}`,
+              CommandAuthorized: true,
+              WasMentioned: wasMentioned,
+            });
+
+            const storePath = core.session.resolveStorePath(cfg.session?.store, {
+              agentId: route.agentId,
+            });
+
+            await core.session.recordInboundSession({
+              storePath,
+              sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+              ctx: ctxPayload,
+              onRecordError: (err) => {
+                ctx.log?.error?.(`csgclaw: recordInboundSession: ${String(err)}`);
+              },
+            });
+
+            const leaseId = randomUUID();
+            const turnController = new AbortController();
+            const turnSignal = combinedAbortSignal(ctx.abortSignal, turnController.signal);
+            activeTurnsByLeaseID.set(leaseId, {
+              controller: turnController,
+              requestId: ctxPayload.MessageSid,
               roomId,
-              wasMentioned,
-            })
-          ) {
-            ctx.log?.debug?.("csgclaw: skipped unmentioned group message");
-            return;
-          }
+              sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+            });
+            const work = createCsgclawWorkLeaseReporter({
+              account,
+              participantId: account.participantId,
+              roomId,
+              threadRootId: topicId || payload.thread_root_id,
+              requestId: ctxPayload.MessageSid,
+              leaseId,
+              log: ctx.log,
+            });
+            const removeStopListener = work.onStopRequested(() => {
+              abortTurn(turnController, "csgclaw turn stop requested");
+            });
+            const { onModelSelected, ...replyPipeline } = createChannelMessageReplyPipeline({
+              cfg,
+              agentId: route.agentId,
+              channel: "csgclaw",
+              accountId: ctx.accountId,
+            });
+            const activityReplyOptions = createCsgclawActivityReplyOptions({
+              account,
+              chatId,
+              log: ctx.log,
+              requestId: ctxPayload.MessageSid,
+              sessionKey: ctxPayload.SessionKey,
+            });
+            const clearThinking = () => {
+              void work.updateStatus({ phase: "working" });
+            };
+            const statusReplyOptions = {
+              ...activityReplyOptions,
+              onAssistantMessageStart: clearThinking,
+              onItemEvent: async (item: OpenClawItemEventPayload) => {
+                clearThinking();
+                await activityReplyOptions.onItemEvent(item);
+              },
+              onReasoningEnd: clearThinking,
+              onReasoningStream: (reasoning: ReplyPayload) => {
+                void work.updateStatus({
+                  phase: "thinking",
+                  thinking: {
+                    text: typeof reasoning.text === "string" ? reasoning.text : "",
+                  },
+                });
+              },
+              onToolStart: clearThinking,
+            };
 
-          const route = core.routing.resolveAgentRoute({
-            cfg,
-            channel: "csgclaw",
-            accountId: ctx.accountId,
-            peer: { kind: chatType, id: chatId },
-          });
-
-          const body = core.reply.formatAgentEnvelope({
-            channel: "CSGClaw",
-            from: payload.sender?.display_name || payload.sender?.username || senderId,
-            timestamp: parseTimestampMs(payload.timestamp),
-            envelope: core.reply.resolveEnvelopeFormatOptions(cfg),
-            body: rawBody,
-          });
-
-          const ctxPayload = core.reply.finalizeInboundContext({
-            Body: body,
-            BodyForAgent: rawBody,
-            RawBody: rawBody,
-            CommandBody: rawBody,
-            From: `csgclaw:user:${senderId}`,
-            To: `csgclaw:room:${chatId}`,
-            SessionKey: route.sessionKey,
-            AccountId: route.accountId,
-            ChatType: chatType,
-            ConversationLabel: chatId,
-            SenderName: payload.sender?.display_name ?? payload.sender?.username ?? senderId,
-            SenderId: senderId,
-            SenderUsername: payload.sender?.username ?? senderId,
-            Provider: "csgclaw",
-            Surface: "csgclaw",
-            MessageSid: payload.message_id ?? "",
-            OriginatingChannel: "csgclaw",
-            OriginatingTo: `csgclaw:room:${chatId}`,
-            CommandAuthorized: true,
-            WasMentioned: wasMentioned,
-          });
-
-          const storePath = core.session.resolveStorePath(cfg.session?.store, {
-            agentId: route.agentId,
-          });
-
-          await core.session.recordInboundSession({
-            storePath,
-            sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
-            ctx: ctxPayload,
-            onRecordError: (err) => {
-              ctx.log?.error?.(`csgclaw: recordInboundSession: ${String(err)}`);
-            },
-          });
-
-          const work = createCsgclawWorkLeaseReporter({
-            account,
-            participantId: account.participantId,
-            roomId,
-            threadRootId: topicId || payload.thread_root_id,
-            requestId: ctxPayload.MessageSid,
-            leaseId: randomUUID(),
-            log: ctx.log,
-          });
-          const { onModelSelected, ...replyPipeline } = createChannelMessageReplyPipeline({
-            cfg,
-            agentId: route.agentId,
-            channel: "csgclaw",
-            accountId: ctx.accountId,
-          });
-          const activityReplyOptions = createCsgclawActivityReplyOptions({
-            account,
-            chatId,
-            log: ctx.log,
-            requestId: ctxPayload.MessageSid,
-            sessionKey: ctxPayload.SessionKey,
-          });
-
-          await dispatchWithCsgclawWorkLease({
-            dispatch: async () => {
-              await dispatchReplyWithVisibleFailure({
-                label: "csgclaw",
-                abortSignal: ctx.abortSignal,
-                log: ctx.log,
+            try {
+              await dispatchWithCsgclawWorkLease({
                 dispatch: async () => {
-                  await core.reply.dispatchReplyWithBufferedBlockDispatcher({
-                    ctx: ctxPayload,
-                    cfg,
-                    dispatcherOptions: {
-                      ...replyPipeline,
-                      deliver: async (payload: ReplyPayload, info: ReplyDeliveryInfo) => {
-                        const out = (payload.text ?? "").trim();
-                        if (!out) {
-                          return;
-                        }
-                        await postSend(
-                          account,
-                          chatId,
-                          out,
-                          openclawDeliveryMetadata({
-                            channel: "csgclaw",
-                            info,
-                            payload,
-                            requestId: ctxPayload.MessageSid,
-                            sessionKey: ctxPayload.SessionKey,
-                          }),
-                        );
-                      },
+                  await dispatchReplyWithVisibleFailure({
+                    label: "csgclaw",
+                    abortSignal: turnSignal,
+                    log: ctx.log,
+                    dispatch: async () => {
+                      await core.reply.dispatchReplyWithBufferedBlockDispatcher({
+                        ctx: ctxPayload,
+                        cfg,
+                        dispatcherOptions: {
+                          ...replyPipeline,
+                          deliver: async (payload: ReplyPayload, info: ReplyDeliveryInfo) => {
+                            if (turnSignal.aborted) {
+                              return;
+                            }
+                            const out = (payload.text ?? "").trim();
+                            if (!out) {
+                              return;
+                            }
+                            await postSend(
+                              account,
+                              chatId,
+                              out,
+                              openclawDeliveryMetadata({
+                                channel: "csgclaw",
+                                info,
+                                payload,
+                                requestId: ctxPayload.MessageSid,
+                                sessionKey: ctxPayload.SessionKey,
+                              }),
+                            );
+                          },
+                        },
+                        replyOptions: {
+                          abortSignal: turnSignal,
+                          onModelSelected,
+                          suppressDefaultToolProgressMessages: true,
+                          ...statusReplyOptions,
+                        },
+                      });
                     },
-                    replyOptions: {
-                      onModelSelected,
-                      suppressDefaultToolProgressMessages: true,
-                      ...activityReplyOptions,
+                    deliverFailure: async (text) => {
+                      if (turnSignal.aborted) {
+                        return;
+                      }
+                      await postSend(
+                        account,
+                        chatId,
+                        text,
+                        openclawDeliveryMetadata({
+                          channel: "csgclaw",
+                          info: { kind: "final" },
+                          payload: { isError: true },
+                          requestId: ctxPayload.MessageSid,
+                          sessionKey: ctxPayload.SessionKey,
+                        }),
+                      );
                     },
                   });
                 },
-                deliverFailure: async (text) => {
-                  await postSend(
-                    account,
-                    chatId,
-                    text,
-                    openclawDeliveryMetadata({
-                      channel: "csgclaw",
-                      info: { kind: "final" },
-                      payload: { isError: true },
-                      requestId: ctxPayload.MessageSid,
-                      sessionKey: ctxPayload.SessionKey,
-                    }),
-                  );
-                },
+                log: ctx.log,
+                renewIntervalMs: workLeaseRenewIntervalMs,
+                reporter: work,
               });
-            },
-            log: ctx.log,
-            renewIntervalMs: workLeaseRenewIntervalMs,
-            reporter: work,
+            } catch (error) {
+              if (!turnSignal.aborted) {
+                throw error;
+              }
+            } finally {
+              removeStopListener();
+              activeTurnsByLeaseID.delete(leaseId);
+            }
           });
+          if (!accepted) {
+            ctx.log?.warn?.("csgclaw: inbound dispatch queue full; dropping message");
+          }
         },
       });
     } catch (err) {
@@ -1022,11 +1178,11 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
       }
     }
   }
+  ctx.abortSignal.removeEventListener("abort", stopAllTurns);
+  stopAllTurns();
 }
 
-export async function monitorCsgclawFeishuProvider(
-  ctx: ChannelGatewayContext<ResolvedCsgclawAccount>,
-) {
+export async function monitorCsgclawFeishuProvider(ctx: ChannelGatewayContext<ResolvedCsgclawAccount>) {
   const account = ctx.account;
   if (!ctx.channelRuntime) {
     ctx.log?.warn?.("csgclaw-feishu: channelRuntime missing; cannot dispatch inbound replies");
@@ -1099,7 +1255,11 @@ export async function monitorCsgclawFeishuProvider(
 
           const ctxPayload = core.reply.finalizeInboundContext({
             Body: body,
-            BodyForAgent: feishuBodyForAgent({ messageId, senderId, content: rawBody }),
+            BodyForAgent: feishuBodyForAgent({
+              messageId,
+              senderId,
+              content: rawBody,
+            }),
             RawBody: rawBody,
             CommandBody: rawBody,
             From: `feishu:${senderId}`,
