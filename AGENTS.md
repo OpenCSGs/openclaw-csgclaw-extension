@@ -27,7 +27,7 @@ to the Makefile, Dockerfiles, or CI configuration.
 ### CI/CD
 
 - **GitLab CI**: triggers on `main` push (via mirror sync from GitHub)
-- **Tag format**: `YYYYMMDD.{CI_PIPELINE_IID}-csgclaw` — auto-incrementing, same-day unique
+- **Tag format**: `YYYYMMDD.{daily_publish_number}-csgclaw` — resets daily in UTC+8; derived from images already published to ACR
 - **Registry**: `opencsg-registry.cn-beijing.cr.aliyuncs.com/opencsghq/openclaw`
 
 ### GitLab Mirror
