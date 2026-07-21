@@ -8,6 +8,7 @@ const LEGACY_SERVER_PAUSE_MS = 5 * 60_000;
 const DEFAULT_STATUS_INTERVAL_MS = 250;
 const MAX_THINKING_BYTES = 16 * 1024;
 const WORK_CAPABILITIES = ["thinking_status_v1", "turn_stop_v1"] as const;
+const WORK_STAGE_CAPABILITY = "work_stage_v1" as const;
 
 type WorkLeaseLog = {
   debug?: (message: string) => void;
@@ -30,10 +31,18 @@ export type CsgclawWorkLeaseReporterOptions = {
   ttlSeconds?: number;
 };
 
+export type WorkLeaseStage =
+  | "preparing_reply"
+  | "thinking"
+  | "running_tool"
+  | "processing_tool_result"
+  | "generating_reply";
+
 export type WorkLeaseStatus =
-  | { phase: "working" }
+  | { phase: "working"; stage?: "running_tool" | "generating_reply" }
   | {
       phase: "thinking";
+      stage?: "preparing_reply" | "thinking" | "processing_tool_result";
       thinking?: {
         format?: "plain_text";
         text: string;
@@ -57,6 +66,7 @@ export type CsgclawWorkLeaseDispatchOptions<T> = {
 
 const unsupportedUntilByAccount = new Map<string, number>();
 const unsupportedStatusUntilByAccount = new Map<string, number>();
+const unsupportedStageUntilByAccount = new Map<string, number>();
 
 type WorkLeaseHTTPResponse = {
   body?: Record<string, unknown>;
@@ -83,6 +93,7 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
   let statusSequence = 0;
   let latestStatus: WorkLeaseStatus | undefined;
   let lastPatchStartedAt = 0;
+  let stageCapabilityAdvertised = false;
   let stopNotified = false;
   const stopListeners = new Set<() => void>();
 
@@ -177,6 +188,17 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
     unsupportedStatusUntilByAccount.set(breakerKey, now() + LEGACY_SERVER_PAUSE_MS);
   };
 
+  const pauseStageForUnsupportedServer = () => {
+    const currentPause = unsupportedStageUntilByAccount.get(breakerKey) ?? 0;
+    if (currentPause <= now()) {
+      options.log?.debug?.(
+        `csgclaw: work stage unsupported; falling back to legacy work status account=${options.account.accountId} participant_id=${options.participantId}`,
+      );
+    }
+    unsupportedStageUntilByAccount.set(breakerKey, now() + LEGACY_SERVER_PAUSE_MS);
+    stageCapabilityAdvertised = false;
+  };
+
   const scheduleStatus = (delay?: number) => {
     if (
       closed ||
@@ -205,11 +227,20 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
     const sendingVersion = statusVersion;
     const sendingStatus = latestStatus;
     const sequence = ++statusSequence;
+    const stageSupported = !accountStageReporterPaused(breakerKey, now());
+    const includeStageCapability = stageSupported && (stageCapabilityAdvertised || Boolean(sendingStatus.stage));
     attemptedStatusVersion = Math.max(attemptedStatusVersion, sendingVersion);
     try {
-      const response = await request("PATCH", statusPatchBody(sequence, sendingStatus));
+      let response = await request("PATCH", statusPatchBody(sequence, sendingStatus, includeStageCapability));
       if (!response) {
         return;
+      }
+      if (response.status === 400 && includeStageCapability && !stageCapabilityAdvertised) {
+        pauseStageForUnsupportedServer();
+        response = await request("PATCH", statusPatchBody(sequence, sendingStatus, false));
+        if (!response) {
+          return;
+        }
       }
       if (isUnsupportedStatus(response.status)) {
         pauseStatusForUnsupportedServer(response.status);
@@ -223,6 +254,9 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
       if (!response.ok) {
         options.log?.warn?.(`csgclaw: work lease PATCH failed status=${response.status} lease_id=${options.leaseId}`);
         return;
+      }
+      if (includeStageCapability && !accountStageReporterPaused(breakerKey, now())) {
+        stageCapabilityAdvertised = true;
       }
       unsupportedStatusUntilByAccount.delete(breakerKey);
     } finally {
@@ -277,7 +311,7 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
       leaseStarted = true;
       notifyStopRequested(response);
       if (!latestStatus) {
-        queueStatus({ phase: "thinking" });
+        queueStatus({ phase: "thinking", stage: "preparing_reply" });
       } else if (statusVersion > attemptedStatusVersion) {
         scheduleStatus(0);
       }
@@ -393,6 +427,15 @@ function accountStatusReporterPaused(key: string, now: number): boolean {
   return true;
 }
 
+function accountStageReporterPaused(key: string, now: number): boolean {
+  const until = unsupportedStageUntilByAccount.get(key) ?? 0;
+  if (until <= now) {
+    unsupportedStageUntilByAccount.delete(key);
+    return false;
+  }
+  return true;
+}
+
 function isUnsupportedStatus(status: number): boolean {
   return status === 404 || status === 405 || status === 501;
 }
@@ -414,14 +457,15 @@ function formatWorkLeaseError(error: unknown): string {
 export function resetWorkLeaseCompatibilityBreakersForTest(): void {
   unsupportedUntilByAccount.clear();
   unsupportedStatusUntilByAccount.clear();
+  unsupportedStageUntilByAccount.clear();
 }
 
 function normalizeWorkLeaseStatus(status: WorkLeaseStatus): WorkLeaseStatus {
   if (status.phase === "working") {
-    return { phase: "working" };
+    return { phase: "working", stage: status.stage };
   }
   if (!status.thinking) {
-    return { phase: "thinking" };
+    return { phase: "thinking", stage: status.stage };
   }
   const normalizedText = status.thinking.text
     .replace(/\r\n?/g, "\n")
@@ -438,6 +482,7 @@ function normalizeWorkLeaseStatus(status: WorkLeaseStatus): WorkLeaseStatus {
   }
   return {
     phase: "thinking",
+    stage: status.stage,
     thinking: {
       format: "plain_text",
       text,
@@ -446,11 +491,16 @@ function normalizeWorkLeaseStatus(status: WorkLeaseStatus): WorkLeaseStatus {
   };
 }
 
-function statusPatchBody(sequence: number, status: WorkLeaseStatus): Record<string, unknown> {
+function statusPatchBody(
+  sequence: number,
+  status: WorkLeaseStatus,
+  includeStageCapability: boolean,
+): Record<string, unknown> {
   return {
-    capabilities: [...WORK_CAPABILITIES],
+    capabilities: includeStageCapability ? [...WORK_CAPABILITIES, WORK_STAGE_CAPABILITY] : [...WORK_CAPABILITIES],
     sequence,
     phase: status.phase,
+    stage: includeStageCapability ? status.stage : undefined,
     thinking:
       status.phase === "thinking" && status.thinking
         ? {
@@ -459,5 +509,71 @@ function statusPatchBody(sequence: number, status: WorkLeaseStatus): Record<stri
             truncated: status.thinking.truncated === true,
           }
         : undefined,
+  };
+}
+
+export type CsgclawTurnStatusTracker = {
+  onAssistantMessageStart: () => void;
+  onFinalText: (payload: { text?: string }) => void;
+  onReasoningEnd: () => void;
+  onReasoningStream: (payload: { text?: string }) => void;
+  onToolEnd: () => void;
+  onToolStart: () => void;
+};
+
+export function createCsgclawTurnStatusTracker(
+  reporter: Pick<CsgclawWorkLeaseReporter, "updateStatus">,
+): CsgclawTurnStatusTracker {
+  let completedTool = false;
+  let generatingReply = false;
+  let currentStage: WorkLeaseStage | undefined;
+  const update = (status: WorkLeaseStatus) => {
+    currentStage = status.stage;
+    void reporter.updateStatus(status);
+  };
+  const waitingForModel = () => {
+    if (generatingReply || currentStage === "thinking") {
+      return;
+    }
+    const nextStage = completedTool ? "processing_tool_result" : "preparing_reply";
+    if (currentStage !== nextStage) {
+      update({ phase: "thinking", stage: nextStage });
+    }
+  };
+
+  return {
+    onAssistantMessageStart: waitingForModel,
+    onFinalText(payload) {
+      if (!String(payload.text || "").trim()) {
+        return;
+      }
+      generatingReply = true;
+      update({ phase: "working", stage: "generating_reply" });
+    },
+    // Keep the final reasoning snapshot visible until a later observable event
+    // moves the turn into tool execution or final-answer generation. Clearing
+    // it here can coalesce a short reasoning stream away before it is reported.
+    onReasoningEnd() {},
+    onReasoningStream(payload) {
+      const text = typeof payload.text === "string" ? payload.text : "";
+      if (!text.trim()) {
+        return;
+      }
+      generatingReply = false;
+      update({
+        phase: "thinking",
+        stage: "thinking",
+        thinking: { text },
+      });
+    },
+    onToolEnd() {
+      completedTool = true;
+      generatingReply = false;
+      update({ phase: "thinking", stage: "processing_tool_result" });
+    },
+    onToolStart() {
+      generatingReply = false;
+      update({ phase: "working", stage: "running_tool" });
+    },
   };
 }
