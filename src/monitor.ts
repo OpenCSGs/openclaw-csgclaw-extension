@@ -1067,9 +1067,12 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             const clearThinking = () => {
               void work.updateStatus({ phase: "working" });
             };
+            const startThinking = () => {
+              void work.updateStatus({ phase: "thinking" });
+            };
             const statusReplyOptions = {
               ...activityReplyOptions,
-              onAssistantMessageStart: clearThinking,
+              onAssistantMessageStart: startThinking,
               onItemEvent: async (item: OpenClawItemEventPayload) => {
                 clearThinking();
                 await activityReplyOptions.onItemEvent(item);
