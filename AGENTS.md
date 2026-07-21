@@ -81,6 +81,12 @@ Local skills live under `.codex/skills/`. Read and follow the matching `SKILL.md
 - Never add `Co-authored-by`, `Signed-off-by`, or any Cursor/Codex/Claude/agent attribution to commit messages.
 - Commit as the repository user only; do not override git author/committer unless explicitly requested.
 
+### Pull request description rules
+
+- Keep the PR description as short as possible.
+- State only what functionality the PR implements.
+- Do not include test results, verification commands, implementation walkthroughs, root-cause sections, or other template-style details unless the user explicitly requests them.
+
 Example:
 
 ```bash
