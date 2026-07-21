@@ -1,5 +1,5 @@
 {
-  "name": "csgclaw-extension",
+  "name": "openclaw-csgclaw-extension",
   "version": "0.6.5-beta.4",
   "description": "OpenClaw channel plugin: CSGClaw participant bridge (SSE + REST)",
   "license": "SEE LICENSE IN LICENSE",
@@ -43,7 +43,7 @@
       "quickstartAllowFrom": true
     },
     "install": {
-      "npmSpec": "csgclaw-extension",
+      "npmSpec": "openclaw-csgclaw-extension",
       "defaultChoice": "npm",
       "minHostVersion": ">=2026.5.26"
     }

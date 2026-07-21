@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createCsgclawTurnStatusTracker,
   createCsgclawWorkLeaseReporter,
   dispatchWithCsgclawWorkLease,
   resetWorkLeaseCompatibilityBreakersForTest,
@@ -236,9 +237,10 @@ test("negotiates capabilities and reports bounded full thinking snapshots", asyn
   await reporter.startOrRenew();
   await waitFor(() => calls.some((call) => call.method === "PATCH"));
   const initial = calls.find((call) => call.method === "PATCH");
-  assert.deepEqual(initial.body.capabilities, ["thinking_status_v1", "turn_stop_v1"]);
+  assert.deepEqual(initial.body.capabilities, ["thinking_status_v1", "turn_stop_v1", "work_stage_v1"]);
   assert.equal(initial.body.sequence, 1);
   assert.equal(initial.body.phase, "thinking");
+  assert.equal(initial.body.stage, "preparing_reply");
 
   await reporter.updateStatus({
     phase: "thinking",
@@ -247,12 +249,71 @@ test("negotiates capabilities and reports bounded full thinking snapshots", asyn
   await waitFor(() => calls.filter((call) => call.method === "PATCH").length >= 2);
   const thinking = calls.filter((call) => call.method === "PATCH").at(-1).body;
   assert.equal(thinking.phase, "thinking");
+  assert.deepEqual(thinking.capabilities, ["thinking_status_v1", "turn_stop_v1", "work_stage_v1"]);
   assert.equal(thinking.thinking.format, "plain_text");
   assert.equal(thinking.thinking.truncated, true);
   assert.ok(Buffer.byteLength(thinking.thinking.text, "utf8") <= 16 * 1024);
   assert.equal(thinking.thinking.text.includes("\u0000"), false);
   assert.equal(thinking.thinking.text.includes("\r"), false);
   await reporter.stop();
+});
+
+test("falls back to legacy status when the server rejects work stages", async () => {
+  const calls = [];
+  let rejectedStage = false;
+  const fetchImpl = async (_url, init) => {
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    calls.push({ body, method: init.method });
+    if (init.method === "PATCH" && body.stage && !rejectedStage) {
+      rejectedStage = true;
+      return new Response(null, { status: 400 });
+    }
+    return new Response(null, { status: init.method === "DELETE" ? 204 : 200 });
+  };
+  const reporter = createCsgclawWorkLeaseReporter(reporterOptions(fetchImpl, { statusIntervalMs: 1 }));
+
+  await reporter.startOrRenew();
+  await waitFor(() => calls.filter((call) => call.method === "PATCH").length >= 2);
+
+  const patches = calls.filter((call) => call.method === "PATCH");
+  assert.equal(patches[0].body.stage, "preparing_reply");
+  assert.ok(patches[0].body.capabilities.includes("work_stage_v1"));
+  assert.equal(patches[1].body.sequence, patches[0].body.sequence);
+  assert.equal(patches[1].body.stage, undefined);
+  assert.deepEqual(patches[1].body.capabilities, ["thinking_status_v1", "turn_stop_v1"]);
+  await reporter.stop();
+});
+
+test("maps observable OpenClaw turn events to precise work stages", () => {
+  const statuses = [];
+  const tracker = createCsgclawTurnStatusTracker({
+    async updateStatus(status) {
+      statuses.push(status);
+    },
+  });
+
+  tracker.onAssistantMessageStart();
+  tracker.onReasoningStream({ text: "" });
+  tracker.onReasoningStream({ text: "checking configuration" });
+  tracker.onReasoningEnd();
+  tracker.onAssistantMessageStart();
+  tracker.onToolStart();
+  tracker.onToolEnd();
+  tracker.onAssistantMessageStart();
+  tracker.onFinalText({ text: "" });
+  tracker.onFinalText({ text: "Here is the result" });
+
+  assert.deepEqual(statuses, [
+    { phase: "thinking", stage: "preparing_reply" },
+    {
+      phase: "thinking",
+      stage: "thinking",
+      thinking: { text: "checking configuration" },
+    },
+    { phase: "working", stage: "running_tool" },
+    { phase: "thinking", stage: "processing_tool_result" },
+    { phase: "working", stage: "generating_reply" },
+  ]);
 });
 
 test("PUT stop markers notify once", async () => {

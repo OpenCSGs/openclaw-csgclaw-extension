@@ -20,6 +20,24 @@ Requirements:
 - pnpm 10 or later
 - A running CSGClaw server
 
+Install the published plugin into an OpenClaw home:
+
+```bash
+openclaw plugins install npm:openclaw-csgclaw-extension
+```
+
+After a new npm release, update the installed plugin without rebuilding the
+OpenClaw image:
+
+```bash
+openclaw plugins update csgclaw
+```
+
+If an older CSGClaw image loads `/home/node/openclaw-plugins` explicitly, remove
+that broad CSGClaw load path before installing the npm package; explicit load
+paths take precedence over managed npm installs. Keep the Feishu plugin path as
+`/home/node/openclaw-plugins/feishu` when it is still needed.
+
 Install dependencies and build the plugin:
 
 ```bash

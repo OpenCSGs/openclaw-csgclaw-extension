@@ -8,7 +8,11 @@ import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import type { ResolvedCsgclawAccount } from "./config.js";
 import { eventsUrl, feishuEventsUrl, feishuMessagesUrl, messagesUrl, resolveFeishuAccountId } from "./config.js";
 import { consumeSseStream } from "./sse.js";
-import { createCsgclawWorkLeaseReporter, dispatchWithCsgclawWorkLease } from "./work-lease.js";
+import {
+  createCsgclawTurnStatusTracker,
+  createCsgclawWorkLeaseReporter,
+  dispatchWithCsgclawWorkLease,
+} from "./work-lease.js";
 
 type CsgclawEventContext = {
   channel?: string;
@@ -391,6 +395,15 @@ function commandOutputSummary(payload: OpenClawCommandOutputPayload): string {
     parts.push(`cwd=${cwd}`);
   }
   return parts.join(" ");
+}
+
+function isTerminalToolProgress(payload: { phase?: string; status?: string }): boolean {
+  const phase = readString(payload.phase).toLowerCase();
+  const status = readString(payload.status).toLowerCase();
+  return (
+    ["end", "ended", "complete", "completed", "result"].includes(phase) ||
+    ["cancelled", "canceled", "complete", "completed", "error", "failed", "success", "succeeded"].includes(status)
+  );
 }
 
 function createCsgclawActivityReplyOptions(params: {
@@ -1064,29 +1077,29 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
               requestId: ctxPayload.MessageSid,
               sessionKey: ctxPayload.SessionKey,
             });
-            const clearThinking = () => {
-              void work.updateStatus({ phase: "working" });
-            };
-            const startThinking = () => {
-              void work.updateStatus({ phase: "thinking" });
-            };
+            const turnStatus = createCsgclawTurnStatusTracker(work);
             const statusReplyOptions = {
               ...activityReplyOptions,
-              onAssistantMessageStart: startThinking,
+              onAssistantMessageStart: turnStatus.onAssistantMessageStart,
+              onCommandOutput: async (command: OpenClawCommandOutputPayload) => {
+                if (isTerminalToolProgress(command)) {
+                  turnStatus.onToolEnd();
+                }
+                await activityReplyOptions.onCommandOutput(command);
+              },
               onItemEvent: async (item: OpenClawItemEventPayload) => {
-                clearThinking();
+                if (isTerminalToolProgress(item)) {
+                  turnStatus.onToolEnd();
+                } else {
+                  turnStatus.onToolStart();
+                }
                 await activityReplyOptions.onItemEvent(item);
               },
-              onReasoningEnd: clearThinking,
-              onReasoningStream: (reasoning: ReplyPayload) => {
-                void work.updateStatus({
-                  phase: "thinking",
-                  thinking: {
-                    text: typeof reasoning.text === "string" ? reasoning.text : "",
-                  },
-                });
-              },
-              onToolStart: clearThinking,
+              onPartialReply: turnStatus.onFinalText,
+              onReasoningEnd: turnStatus.onReasoningEnd,
+              onReasoningStream: turnStatus.onReasoningStream,
+              onToolResult: turnStatus.onToolEnd,
+              onToolStart: turnStatus.onToolStart,
             };
 
             try {

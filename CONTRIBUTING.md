@@ -137,16 +137,18 @@ GitLab CI automatically triggers when `main` is updated via mirror sync (default
 `package.json` is the single source of truth for the plugin version. Docker
 builds copy it into the image and do not maintain a separate version value.
 
-### npm Package (Optional)
+### npm Package
 
-The npm package name is `csgclaw-extension` (unchanged):
+The npm package name is `openclaw-csgclaw-extension`:
 
 ```bash
 pnpm run build
-npm publish
+npm publish --access public
 ```
 
-Note: Docker image builds do not require npm publishing.
+OpenClaw installs it with
+`openclaw plugins install npm:openclaw-csgclaw-extension` and can update it
+independently from the runtime image.
 
 ## Pull Request Process
 

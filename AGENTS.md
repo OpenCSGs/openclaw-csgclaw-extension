@@ -3,7 +3,7 @@
 ## Project Identity
 
 - **Repository**: `openclaw-csgclaw-extension`
-- **npm package**: `csgclaw-extension` (name unchanged on npm)
+- **npm package**: `openclaw-csgclaw-extension`
 - **Purpose**: OpenClaw channel plugin bridging CSGClaw IM ↔ OpenClaw gateway
 
 ---
@@ -99,4 +99,4 @@ python3 .codex/skills/conventional-commit/scripts/apply_commit.py --repo . --mes
 ## References
 
 - [Docker files docs](./docker/README.md)
-- [npm package](https://www.npmjs.com/package/csgclaw-extension)
+- [npm package](https://www.npmjs.com/package/openclaw-csgclaw-extension)
