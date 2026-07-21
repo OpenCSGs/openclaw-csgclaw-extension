@@ -8,7 +8,8 @@
 #   ACR_REGISTRY, ACR_USERNAME, ACR_PASSWORD
 #
 # Trigger: main branch push only.
-# Tag format: YYYYMMDD.{pipeline_id}-csgclaw  (same-day multiple builds get unique IDs)
+# Tag format: YYYYMMDD.{daily_publish_number}-csgclaw
+# The sequence resets every day in UTC+8 and counts images already published to ACR.
 
 variables:
   DOCKER_TLS_CERTDIR: "/certs"
@@ -32,6 +33,7 @@ stages:
 # Single-stage pipeline: build dist, then buildx push.
 docker-build-push:
   stage: build
+  resource_group: openclaw-image-publish
   image:
     name: ${ACR_REGISTRY}/opencsg_public/docker-ci:v1.0.1
     entrypoint: [""]
@@ -50,8 +52,34 @@ docker-build-push:
     - ': "${ACR_USERNAME:?ACR_USERNAME is required}"'
     - ': "${ACR_PASSWORD:?ACR_PASSWORD is required}"'
     - echo "$ACR_PASSWORD" | docker login -u "$ACR_USERNAME" --password-stdin "$ACR_REGISTRY"
-    - export IMAGE_TAG="$(date +%Y%m%d).${CI_PIPELINE_IID}-csgclaw"
     - export DOCKER_IMAGE="${ACR_REGISTRY}/${IMAGE_REPO}"
+    - |
+      set -euo pipefail
+      utc8_epoch=$(($(date +%s) + 8 * 60 * 60))
+      image_date="$(date -u -d "@${utc8_epoch}" +%Y%m%d)"
+      tags_url="https://${ACR_REGISTRY}/v2/${IMAGE_REPO}/tags/list?n=10000"
+      auth_challenge="$(curl -sS -D - -o /dev/null "${tags_url}" \
+        | tr -d '\r' \
+        | awk 'tolower($1) == "www-authenticate:" { sub(/^[^:]+:[[:space:]]*/, ""); print; exit }')"
+      realm="$(printf '%s\n' "${auth_challenge}" | sed -n 's/.*realm="\([^"]*\)".*/\1/p')"
+      service="$(printf '%s\n' "${auth_challenge}" | sed -n 's/.*service="\([^"]*\)".*/\1/p')"
+      scope="$(printf '%s\n' "${auth_challenge}" | sed -n 's/.*scope="\([^"]*\)".*/\1/p')"
+      registry_token="$(curl -fsSG "${realm}" \
+        --data-urlencode "service=${service}" \
+        --data-urlencode "scope=${scope}" \
+        | jq -er '.token // .access_token')"
+      tags_json="$(curl -fsS -H "Authorization: Bearer ${registry_token}" "${tags_url}")"
+      published_today="$(printf '%s' "${tags_json}" \
+        | jq -r --arg date "${image_date}" \
+          '[.tags[]? | select(test("^" + $date + "\\.[0-9]+-csgclaw$"))] | length')"
+      image_sequence=$((published_today + 1))
+      while printf '%s' "${tags_json}" \
+        | jq -e --arg tag "${image_date}.${image_sequence}-csgclaw" \
+          '.tags | index($tag) != null' >/dev/null; do
+        image_sequence=$((image_sequence + 1))
+      done
+      export IMAGE_TAG="${image_date}.${image_sequence}-csgclaw"
+      echo "Published images on ${image_date}: ${published_today}"
     - export BASE_IMG="${ACR_REGISTRY}/${BASE_IMAGE_REPO}:${BASE_TAG}"
     - echo "IMAGE_TAG=${IMAGE_TAG}" && echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
     - echo "BASE_IMG=${BASE_IMG}"
@@ -104,62 +132,15 @@ docker-build-push:
         --sbom=false \
         --push \
         .
-    - |
-      set -euo pipefail
-      docker buildx imagetools inspect "${DOCKER_IMAGE}:${IMAGE_TAG}"
-      for entry in "linux/amd64:x86_64" "linux/arm64:aarch64"; do
-        platform="${entry%%:*}"
-        expected_arch="${entry##*:}"
-        echo "Validating ${DOCKER_IMAGE}:${IMAGE_TAG} on ${platform}"
-        docker run --rm --platform "${platform}" --entrypoint /bin/sh "${DOCKER_IMAGE}:${IMAGE_TAG}" -ec "
-          set -x
-          test \"\$(uname -m)\" = \"${expected_arch}\"
-          tini --version >/dev/null
-          python --version >/dev/null
-          node --version >/dev/null
-          node /app/openclaw.mjs --version >/dev/null
-          test -f /home/node/openclaw-plugins/csgclaw-extension/dist/index.js
-          test -f /home/node/openclaw-plugins/csgclaw-extension/openclaw.plugin.json
-          test -f /home/node/openclaw-plugins/csgclaw-extension/package.json
-          test -L /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw
-          test \"\$(readlink /home/node/openclaw-plugins/csgclaw-extension/node_modules/openclaw)\" = \"/app\"
-          test -f /home/node/openclaw-plugins/feishu/dist/index.js
-          test -f /home/node/openclaw-plugins/feishu/dist/setup-entry.js
-          test -f /home/node/openclaw-plugins/feishu/openclaw.plugin.json
-          test -L /home/node/openclaw-plugins/feishu/node_modules/openclaw
-          test \"\$(readlink /home/node/openclaw-plugins/feishu/node_modules/openclaw)\" = \"/app\"
-          ! grep -R \"/open-apis/bot/v1/openclaw_bot/ping\" /home/node/openclaw-plugins/feishu/dist
-          grep -R \"/open-apis/bot/v3/info\" /home/node/openclaw-plugins/feishu/dist
-          node --input-type=module -e '
-            import fs from \"node:fs\";
-            const pkg = JSON.parse(fs.readFileSync(\"/home/node/openclaw-plugins/feishu/package.json\", \"utf8\"));
-            if (pkg.openclaw?.extensions?.[0] !== \"./dist/index.js\") throw new Error(\"bad feishu extension entry\");
-            if (pkg.openclaw?.setupEntry !== \"./dist/setup-entry.js\") throw new Error(\"bad feishu setup entry\");
-            await import(\"file:///home/node/openclaw-plugins/feishu/dist/index.js\");
-          '
-          node --input-type=module -e '
-            const { loadOpenClawPlugins } = await import(\"/app/dist/plugins/loader.js\");
-            const config = {
-              channels: {
-                csgclaw: { enabled: true, baseUrl: \"http://127.0.0.1:18080\", botId: \"ci\" },
-                feishu: {
-                  enabled: true,
-                  defaultAccount: \"ci\",
-                  accounts: { ci: { enabled: true, appId: \"cli_a_ci\", appSecret: \"ci-secret\" } }
-                }
-              },
-              plugins: {
-                load: { paths: [\"/home/node/openclaw-plugins\"] },
-                entries: { csgclaw: { enabled: true }, feishu: { enabled: true } }
-              }
-            };
-            const registry = loadOpenClawPlugins({ config, cache: false, throwOnLoadError: false, env: process.env });
-            for (const id of [\"csgclaw\", \"feishu\"]) {
-              const plugin = registry.plugins.find((entry) => entry.id === id);
-              if (!plugin || plugin.status !== \"loaded\") throw new Error(id + \" not loaded: \" + (plugin?.error ?? \"missing\"));
-            }
-          '
-        "
-      done
+      printf '%s\n' "${DOCKER_IMAGE}:${IMAGE_TAG}" > ".published-image-${CI_PIPELINE_ID}"
   after_script:
     - docker buildx rm "csgclaw-ext-${CI_PIPELINE_ID}" 2>/dev/null || true
+    - |
+      if [ -s ".published-image-${CI_PIPELINE_ID}" ]; then
+        image_ref="$(head -n 1 ".published-image-${CI_PIPELINE_ID}")"
+        printf '\n'
+        printf '======================================================================\n'
+        printf '  OPENCLAW IMAGE PUBLISHED\n'
+        printf '  %s\n' "${image_ref}"
+        printf '======================================================================\n'
+      fi

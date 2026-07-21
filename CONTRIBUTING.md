@@ -121,9 +121,9 @@ GitLab CI automatically triggers when `main` is updated via mirror sync (default
 3. Click the **refresh button** (🔄) next to the mirror entry
 4. Check **CI/CD → Pipelines** for build status
 
-**Image tag format:** `YYYYMMDD.{CI_PIPELINE_IID}-csgclaw`
-- `CI_PIPELINE_IID` is GitLab's project-level monotonic ID
-- Same-day builds get unique tags: `20260609.1-csgclaw`, `20260609.2-csgclaw`, etc.
+**Image tag format:** `YYYYMMDD.{daily_publish_number}-csgclaw`
+- The number resets every day in UTC+8 and is derived from images already published to ACR.
+- Failed builds do not consume a number; same-day publishes are serialized to avoid duplicate tags.
 
 ## Version Release
 
