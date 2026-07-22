@@ -46,8 +46,8 @@ Dockerfile uses `--chown=root:root` for plugin dirs. CSGClaw sandbox runs as hos
 
 ```bash
 # Dev
-pnpm install --frozen-lockfile
-pnpm run build
+make build
+make build dev-o-3        # build and sync to a local agent by name
 
 # Docker
 make image-local          # local single-arch
