@@ -41,11 +41,12 @@ paths take precedence over managed npm installs. Keep the Feishu plugin path as
 Install dependencies and build the plugin:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm run build
+make build
 ```
 
-The compiled plugin is written to `dist/`.
+`make build` runs `pnpm install --frozen-lockfile` only when `package.json`,
+`pnpm-lock.yaml`, or the current `node_modules` install state changed. The
+compiled plugin is written to `dist/`.
 
 ## Configuration
 
@@ -107,7 +108,8 @@ The bot responds in group rooms only when mentioned by default. Per-room behavio
 ## Development
 
 ```bash
-pnpm run build
+make build           # build only
+make build dev-o-3   # build, resolve the agent name, and sync it
 pnpm test
 ```
 
@@ -116,6 +118,19 @@ Build and load a local single-architecture Docker image:
 ```bash
 make image-local
 ```
+
+Build and sync the local plugin into an already-running CSGClaw Docker agent.
+The short form accepts the agent name shown in the CSGClaw UI:
+
+```bash
+make build dev-o-3
+```
+
+The target builds and packages the complete npm plugin, replaces
+`/home/node/openclaw-plugins/csgclaw-extension` in the agent container, and
+restarts it so OpenClaw reloads the plugin. The name is resolved through
+`~/.csgclaw/state.json`. This is a local Docker development command; run it
+again after the agent container is recreated.
 
 For production image targets and release details, see [docker/README.md](docker/README.md).
 
