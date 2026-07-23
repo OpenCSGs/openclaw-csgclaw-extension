@@ -61,6 +61,22 @@ test("starts, renews with one lease id, and releases", async () => {
   assert.ok(calls.every((call) => call.url.endsWith("/work-leases/00000000-0000-4000-8000-000000000001")));
   const putBodies = calls.filter((call) => call.method === "PUT").map((call) => JSON.parse(call.body));
   assert.ok(putBodies.every((body) => body.room_id === "room-1" && body.ttl_seconds === 15));
+  assert.deepEqual(JSON.parse(calls.find((call) => call.method === "DELETE").body), { outcome: "released" });
+});
+
+test("reports an explicit stopped completion outcome", async () => {
+  let deleteBody;
+  const fetchImpl = async (_url, init) => {
+    if (init.method === "DELETE") {
+      deleteBody = JSON.parse(init.body);
+      return new Response(null, { status: 204 });
+    }
+    return new Response(null, { status: 200 });
+  };
+  const reporter = createCsgclawWorkLeaseReporter(reporterOptions(fetchImpl));
+  await reporter.startOrRenew();
+  await reporter.stop("stopped");
+  assert.deepEqual(deleteBody, { outcome: "stopped" });
 });
 
 test("keeps at most one PUT in flight and stop aborts it before DELETE", async () => {
@@ -163,6 +179,21 @@ test("dispatch lifecycle starts before dispatch and stops after delivery", async
 
   assert.equal(result, "ok");
   assert.deepEqual(order, ["start", "dispatch", "delivered", "stop"]);
+});
+
+test("dispatch lifecycle passes the resolved completion outcome", async () => {
+  const outcomes = [];
+  await dispatchWithCsgclawWorkLease({
+    completionOutcome: () => "stopped",
+    dispatch: async () => "done",
+    reporter: {
+      async startOrRenew() {},
+      async stop(outcome) {
+        outcomes.push(outcome);
+      },
+    },
+  });
+  assert.deepEqual(outcomes, ["stopped"]);
 });
 
 test("dispatch lifecycle renews independently of OpenClaw typing", async () => {
@@ -367,6 +398,30 @@ test("PATCH stop markers notify once", async () => {
 
   assert.equal(stopped, 1);
   assert.equal(calls.filter((method) => method === "PATCH").length, 1);
+  await reporter.stop();
+});
+
+test("failed stop markers do not notify the runtime", async () => {
+  const fetchImpl = async (_url, init) =>
+    new Response(
+      init.method === "DELETE"
+        ? null
+        : JSON.stringify({
+            stop_requested_at: "2026-07-20T03:00:08Z",
+            stop_state: "stop_failed",
+          }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: init.method === "DELETE" ? 204 : 200,
+      },
+    );
+  const reporter = createCsgclawWorkLeaseReporter(reporterOptions(fetchImpl));
+  let stopped = 0;
+  reporter.onStopRequested(() => {
+    stopped += 1;
+  });
+  await reporter.startOrRenew();
+  assert.equal(stopped, 0);
   await reporter.stop();
 });
 
