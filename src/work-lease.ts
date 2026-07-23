@@ -50,10 +50,12 @@ export type WorkLeaseStatus =
       };
     };
 
+export type WorkLeaseCompletionOutcome = "released" | "stopped";
+
 export type CsgclawWorkLeaseReporter = {
   startOrRenew: () => Promise<void>;
   updateStatus: (status: WorkLeaseStatus) => Promise<void>;
-  stop: () => Promise<void>;
+  stop: (outcome?: WorkLeaseCompletionOutcome) => Promise<void>;
   onStopRequested: (listener: () => void) => () => void;
 };
 
@@ -62,6 +64,7 @@ export type CsgclawWorkLeaseDispatchOptions<T> = {
   log?: WorkLeaseLog;
   renewIntervalMs?: number;
   reporter: CsgclawWorkLeaseReporter;
+  completionOutcome?: () => WorkLeaseCompletionOutcome;
 };
 
 const unsupportedUntilByAccount = new Map<string, number>();
@@ -163,7 +166,12 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
   };
 
   const notifyStopRequested = (response: WorkLeaseHTTPResponse) => {
-    if (stopNotified || typeof response.body?.stop_requested_at !== "string") {
+    const stopState = response.body?.stop_state ?? response.body?.state;
+    if (
+      stopNotified ||
+      typeof response.body?.stop_requested_at !== "string" ||
+      (stopState !== undefined && stopState !== "stop_requested")
+    ) {
       return;
     }
     stopNotified = true;
@@ -343,7 +351,7 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
       }
       return () => stopListeners.delete(listener);
     },
-    async stop() {
+    async stop(outcome = "released") {
       if (closed) {
         return;
       }
@@ -360,7 +368,7 @@ export function createCsgclawWorkLeaseReporter(options: CsgclawWorkLeaseReporter
       if (accountReporterPaused(breakerKey, now())) {
         return;
       }
-      const response = await request("DELETE");
+      const response = await request("DELETE", { outcome });
       if (!response) {
         return;
       }
@@ -402,7 +410,7 @@ export async function dispatchWithCsgclawWorkLease<T>(options: CsgclawWorkLeaseD
   } finally {
     clearInterval(renewTimer);
     try {
-      await options.reporter.stop();
+      await options.reporter.stop(options.completionOutcome?.() ?? "released");
     } catch (error) {
       options.log?.warn?.(`csgclaw: work lease dispatch stop failed: ${formatWorkLeaseError(error)}`);
     }

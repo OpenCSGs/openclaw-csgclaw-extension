@@ -906,6 +906,7 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
       requestId: string;
       roomId: string;
       sessionKey: string;
+      stopRequested: boolean;
     }
   >();
   const dispatchQueue = new BoundedDispatchQueue(maxQueuedCsgclawMessages, (error) => {
@@ -943,6 +944,7 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
               active.roomId === readString(control.room_id) &&
               active.requestId === readString(control.request_id)
             ) {
+              active.stopRequested = true;
               abortTurn(active.controller, "csgclaw turn stop requested");
             }
             return;
@@ -1046,12 +1048,14 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
             const leaseId = randomUUID();
             const turnController = new AbortController();
             const turnSignal = combinedAbortSignal(ctx.abortSignal, turnController.signal);
-            activeTurnsByLeaseID.set(leaseId, {
+            const activeTurn = {
               controller: turnController,
               requestId: ctxPayload.MessageSid,
               roomId,
               sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
-            });
+              stopRequested: false,
+            };
+            activeTurnsByLeaseID.set(leaseId, activeTurn);
             const work = createCsgclawWorkLeaseReporter({
               account,
               participantId: account.participantId,
@@ -1062,6 +1066,7 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
               log: ctx.log,
             });
             const removeStopListener = work.onStopRequested(() => {
+              activeTurn.stopRequested = true;
               abortTurn(turnController, "csgclaw turn stop requested");
             });
             const { onModelSelected, ...replyPipeline } = createChannelMessageReplyPipeline({
@@ -1167,6 +1172,7 @@ export async function monitorCsgclawProvider(ctx: ChannelGatewayContext<Resolved
                 log: ctx.log,
                 renewIntervalMs: workLeaseRenewIntervalMs,
                 reporter: work,
+                completionOutcome: () => (activeTurn.stopRequested ? "stopped" : "released"),
               });
             } catch (error) {
               if (!turnSignal.aborted) {
