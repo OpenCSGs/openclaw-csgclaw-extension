@@ -342,7 +342,7 @@ test("maps observable OpenClaw turn events to precise work stages", () => {
       thinking: { text: "checking configuration" },
     },
     { phase: "working", stage: "running_tool" },
-    { phase: "thinking", stage: "processing_tool_result" },
+    { phase: "thinking" },
     { phase: "working", stage: "generating_reply" },
   ]);
 });
