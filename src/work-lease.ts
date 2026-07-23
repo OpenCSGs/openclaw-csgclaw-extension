@@ -35,14 +35,13 @@ export type WorkLeaseStage =
   | "preparing_reply"
   | "thinking"
   | "running_tool"
-  | "processing_tool_result"
   | "generating_reply";
 
 export type WorkLeaseStatus =
   | { phase: "working"; stage?: "running_tool" | "generating_reply" }
   | {
       phase: "thinking";
-      stage?: "preparing_reply" | "thinking" | "processing_tool_result";
+      stage?: "preparing_reply" | "thinking";
       thinking?: {
         format?: "plain_text";
         text: string;
@@ -540,12 +539,11 @@ export function createCsgclawTurnStatusTracker(
     void reporter.updateStatus(status);
   };
   const waitingForModel = () => {
-    if (generatingReply || currentStage === "thinking") {
+    if (generatingReply || currentStage === "thinking" || completedTool) {
       return;
     }
-    const nextStage = completedTool ? "processing_tool_result" : "preparing_reply";
-    if (currentStage !== nextStage) {
-      update({ phase: "thinking", stage: nextStage });
+    if (currentStage !== "preparing_reply") {
+      update({ phase: "thinking", stage: "preparing_reply" });
     }
   };
 
@@ -555,6 +553,7 @@ export function createCsgclawTurnStatusTracker(
       if (!String(payload.text || "").trim()) {
         return;
       }
+      completedTool = false;
       generatingReply = true;
       update({ phase: "working", stage: "generating_reply" });
     },
@@ -567,6 +566,7 @@ export function createCsgclawTurnStatusTracker(
       if (!text.trim()) {
         return;
       }
+      completedTool = false;
       generatingReply = false;
       update({
         phase: "thinking",
@@ -577,9 +577,10 @@ export function createCsgclawTurnStatusTracker(
     onToolEnd() {
       completedTool = true;
       generatingReply = false;
-      update({ phase: "thinking", stage: "processing_tool_result" });
+      update({ phase: "thinking" });
     },
     onToolStart() {
+      completedTool = false;
       generatingReply = false;
       update({ phase: "working", stage: "running_tool" });
     },
